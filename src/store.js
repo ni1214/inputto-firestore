@@ -186,6 +186,23 @@ export async function loadDrawingRows(env, c2, drawingId) {
     .sort((left, right) => String(left.symbol || '').localeCompare(String(right.symbol || ''), 'ja', { numeric: true }));
 }
 
+export async function loadProjectSymbols(env, c2) {
+  const snapshot = await getDocs(symbolsRef(env, c2));
+  return snapshot.docs
+    .map((item) => ({
+      uiId: crypto.randomUUID(),
+      docId: item.id,
+      ...item.data()
+    }))
+    .sort((left, right) => {
+      const drawingDiff = String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', { numeric: true });
+      if (drawingDiff !== 0) {
+        return drawingDiff;
+      }
+      return String(left.symbol || '').localeCompare(String(right.symbol || ''), 'ja', { numeric: true });
+    });
+}
+
 export async function saveProjectHeader(env, project, operator) {
   const cleanProject = sanitizeProject(project);
   if (!cleanProject.c2) {

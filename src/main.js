@@ -1,11 +1,15 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
-import { listProjects, loadProjectBundle, loadDrawingRows, saveDrawingBundle } from './store.js';
+import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
 
 const SAVE_ACTOR = 'system';
+const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
+const MODE_STORAGE_KEY = 'inputto_active_mode';
 
 const state = {
   env: 'production',
+  activeMode: localStorage.getItem(MODE_STORAGE_KEY) || 'editor',
+  sidebarCollapsed: localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true',
   loading: false,
   saving: false,
   projects: [],
@@ -15,10 +19,25 @@ const state = {
   drawing: { ...DRAWING_TEMPLATE },
   rows: [],
   selectedRowIds: new Set(),
-  filterText: ''
+  filterText: '',
+  search: {
+    projectC2: '',
+    keyword: '',
+    floor: '',
+    insideOutside: '',
+    resultCountText: '0件',
+    hint: '検索結果はここに表示されます。',
+    results: [],
+    cacheProjectC2: '',
+    cacheRows: []
+  }
 };
 
 const elements = {
+  appShell: document.getElementById('appShell'),
+  sidebarToggle: document.getElementById('sidebarToggle'),
+  navItems: Array.from(document.querySelectorAll('[data-mode]')),
+  modePanels: Array.from(document.querySelectorAll('[data-mode-panel]')),
   busyState: document.getElementById('busyState'),
   statusText: document.getElementById('statusText'),
   projectSelect: document.getElementById('projectSelect'),
@@ -39,10 +58,19 @@ const elements = {
   deleteRowsButton: document.getElementById('deleteRowsButton'),
   tableHead: document.getElementById('tableHead'),
   tableBody: document.getElementById('tableBody'),
+  searchProjectSelect: document.getElementById('searchProjectSelect'),
+  searchKeywordInput: document.getElementById('searchKeywordInput'),
+  searchFloorInput: document.getElementById('searchFloorInput'),
+  searchInsideOutsideInput: document.getElementById('searchInsideOutsideInput'),
+  searchButton: document.getElementById('searchButton'),
+  searchResultCount: document.getElementById('searchResultCount'),
+  searchResultHint: document.getElementById('searchResultHint'),
+  searchResultsBody: document.getElementById('searchResultsBody'),
   summaryProject: document.getElementById('summaryProject'),
   summaryDrawing: document.getElementById('summaryDrawing'),
   summaryRows: document.getElementById('summaryRows'),
   summaryLabels: document.getElementById('summaryLabels'),
+  inspectionTableBody: document.getElementById('inspectionTableBody'),
   labelPages: document.getElementById('labelPages'),
   printButton: document.getElementById('printButton')
 };
@@ -64,6 +92,14 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+}
+
 function setBusy(mode, message) {
   state.loading = mode === 'loading';
   state.saving = mode === 'saving';
@@ -76,6 +112,48 @@ function setStatus(message) {
   setBusy('', message);
 }
 
+function setActiveMode(mode) {
+  state.activeMode = mode;
+  localStorage.setItem(MODE_STORAGE_KEY, mode);
+  renderChrome();
+}
+
+function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  localStorage.setItem(SIDEBAR_STORAGE_KEY, String(state.sidebarCollapsed));
+  renderChrome();
+}
+
+function renderChrome() {
+  elements.appShell.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
+  elements.navItems.forEach((item) => item.classList.toggle('is-active', item.dataset.mode === state.activeMode));
+  elements.modePanels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.modePanel === state.activeMode));
+}
+
+function syncProjectFromForm() {
+  state.project = {
+    c2: elements.projectC2Input.value.trim(),
+    projectName: elements.projectNameInput.value.trim(),
+    shortName: elements.projectShortNameInput.value.trim(),
+    contact: elements.projectContactInput.value.trim()
+  };
+}
+
+function syncDrawingFromForm() {
+  state.drawing = {
+    ...state.drawing,
+    drawingNumber: elements.drawingNumberInput.value.trim(),
+    drawingStatus: elements.drawingStatusInput.value.trim()
+  };
+}
+
+function syncSearchFromForm() {
+  state.search.projectC2 = elements.searchProjectSelect.value.trim();
+  state.search.keyword = elements.searchKeywordInput.value.trim();
+  state.search.floor = elements.searchFloorInput.value.trim();
+  state.search.insideOutside = elements.searchInsideOutsideInput.value.trim();
+}
+
 function updateFormInputs() {
   elements.projectC2Input.value = state.project.c2 || '';
   elements.projectNameInput.value = state.project.projectName || '';
@@ -84,24 +162,30 @@ function updateFormInputs() {
   elements.drawingNumberInput.value = state.drawing.drawingNumber || '';
   elements.drawingStatusInput.value = state.drawing.drawingStatus || '';
   elements.filterInput.value = state.filterText || '';
+  elements.searchProjectSelect.value = state.search.projectC2 || '';
+  elements.searchKeywordInput.value = state.search.keyword || '';
+  elements.searchFloorInput.value = state.search.floor || '';
+  elements.searchInsideOutsideInput.value = state.search.insideOutside || '';
 }
 
-function renderProjectSelect() {
-  const currentValue = state.project.c2 || '';
-  const options = ['<option value="">工事を選択</option>']
+function buildProjectOptions(selectedValue) {
+  return ['<option value="">工事を選択</option>']
     .concat(
       state.projects.map((project) => {
         const label = [project.projectName || '-', `工事 ${project.c2}`];
         if (project.drawingCount || project.symbolCount) {
           label.push(`手配書 ${project.drawingCount || 0}件 / 符号 ${project.symbolCount || 0}件`);
         }
-        const selected = currentValue && currentValue === project.c2 ? ' selected' : '';
+        const selected = selectedValue && selectedValue === project.c2 ? ' selected' : '';
         return `<option value="${escapeHtml(project.c2)}"${selected}>${escapeHtml(label.join(' / '))}</option>`;
       })
     )
     .join('');
+}
 
-  elements.projectSelect.innerHTML = options;
+function renderProjectSelects() {
+  elements.projectSelect.innerHTML = buildProjectOptions(state.project.c2 || '');
+  elements.searchProjectSelect.innerHTML = buildProjectOptions(state.search.projectC2 || '');
 }
 
 function renderDrawingTabs() {
@@ -143,6 +227,14 @@ function matchesFilter(row) {
     .join(' ')
     .toLowerCase()
     .includes(term);
+}
+
+function hasRowContent(row) {
+  return FIELD_DEFS.some((field) => String(row[field.key] || '').trim() !== '');
+}
+
+function getReportRows() {
+  return state.rows.filter(hasRowContent);
 }
 
 function buildLabelItems(rows) {
@@ -209,11 +301,39 @@ function renderSummary(rows) {
   renderLabelPages(rows);
 }
 
+function renderInspectionTable(rows) {
+  if (!rows.length) {
+    elements.inspectionTableBody.innerHTML = '<tr><td colspan="8" class="empty-text">手配書を読み込むと検査表が表示されます。</td></tr>';
+    return;
+  }
+
+  elements.inspectionTableBody.innerHTML = rows
+    .map((row) => `
+      <tr>
+        <td>${escapeHtml(state.drawing.drawingNumber || '-')}</td>
+        <td>${escapeHtml(row.symbol || '')}</td>
+        <td>${escapeHtml(row.name || '')}</td>
+        <td>${escapeHtml(row.floor || '')}</td>
+        <td>${escapeHtml(row.insideOutside || '')}</td>
+        <td>${escapeHtml(row.labelCount || '')}</td>
+        <td>${escapeHtml(row.bakeColor || '')}</td>
+        <td>${escapeHtml(row.draftAssignee || '')}</td>
+      </tr>
+    `)
+    .join('');
+}
+
+function renderReport() {
+  const reportRows = getReportRows();
+  renderSummary(reportRows);
+  renderInspectionTable(reportRows);
+}
+
 function renderRows() {
   const visibleRows = state.rows.filter(matchesFilter);
   if (!visibleRows.length) {
     elements.tableBody.innerHTML = '<tr><td colspan="34" class="empty-text">表示できる符号がありません。</td></tr>';
-    renderSummary([]);
+    renderReport();
     return;
   }
 
@@ -243,24 +363,57 @@ function renderRows() {
     })
     .join('');
 
-  renderSummary(visibleRows);
+  renderReport();
 }
 
-function syncProjectFromForm() {
-  state.project = {
-    c2: elements.projectC2Input.value.trim(),
-    projectName: elements.projectNameInput.value.trim(),
-    shortName: elements.projectShortNameInput.value.trim(),
-    contact: elements.projectContactInput.value.trim()
-  };
+function renderSearchResults() {
+  elements.searchResultCount.textContent = state.search.resultCountText;
+  elements.searchResultHint.textContent = state.search.hint;
+
+  if (!state.search.results.length) {
+    elements.searchResultsBody.innerHTML = '<tr><td colspan="7" class="empty-text">一致するデータがありません。</td></tr>';
+    return;
+  }
+
+  elements.searchResultsBody.innerHTML = state.search.results
+    .map((row, index) => `
+      <tr>
+        <td>${escapeHtml(row.drawingNumber || '')}</td>
+        <td>${escapeHtml(row.symbol || '')}</td>
+        <td>${escapeHtml(row.name || '')}</td>
+        <td>${escapeHtml(row.floor || '')}</td>
+        <td>${escapeHtml(row.insideOutside || '')}</td>
+        <td>${escapeHtml(row.bakeColor || '')}</td>
+        <td>
+          <button type="button" class="ghost-button compact-button" data-open-search-result="${index}">
+            <span class="material-symbols-outlined">open_in_new</span>
+            <span>編集で開く</span>
+          </button>
+        </td>
+      </tr>
+    `)
+    .join('');
 }
 
-function syncDrawingFromForm() {
-  state.drawing = {
-    ...state.drawing,
-    drawingNumber: elements.drawingNumberInput.value.trim(),
-    drawingStatus: elements.drawingStatusInput.value.trim()
-  };
+function renderAll() {
+  updateFormInputs();
+  renderChrome();
+  renderProjectSelects();
+  renderDrawingTabs();
+  renderRows();
+  renderSearchResults();
+}
+
+async function refreshProjects() {
+  setBusy('loading', '工事一覧を読み込んでいます。');
+  try {
+    state.projects = await listProjects(state.env);
+    renderProjectSelects();
+    setStatus('工事一覧を更新しました。');
+  } catch (error) {
+    console.error(error);
+    setStatus(`工事一覧の読込に失敗しました: ${error.message}`);
+  }
 }
 
 function resetDrawingState() {
@@ -275,25 +428,6 @@ function clearProjectState() {
   state.drawings = [];
   resetDrawingState();
   renderAll();
-}
-
-function renderAll() {
-  updateFormInputs();
-  renderProjectSelect();
-  renderDrawingTabs();
-  renderRows();
-}
-
-async function refreshProjects() {
-  setBusy('loading', '工事一覧を読み込んでいます。');
-  try {
-    state.projects = await listProjects(state.env);
-    renderProjectSelect();
-    setStatus('工事一覧を更新しました。');
-  } catch (error) {
-    console.error(error);
-    setStatus(`工事一覧の読込に失敗しました: ${error.message}`);
-  }
 }
 
 async function selectProject(c2) {
@@ -313,6 +447,9 @@ async function selectProject(c2) {
       contact: project.contact || ''
     };
     state.drawings = drawings;
+    if (!state.search.projectC2) {
+      state.search.projectC2 = state.project.c2;
+    }
     resetDrawingState();
     renderAll();
     setStatus(`工事 ${c2} を読み込みました。`);
@@ -443,7 +580,85 @@ function deleteSelectedRows() {
   setStatus('選択行を削除しました。');
 }
 
+async function performSearch() {
+  syncSearchFromForm();
+
+  if (!state.search.projectC2) {
+    state.search.results = [];
+    state.search.resultCountText = '0件';
+    state.search.hint = '先に工事を選択してください。';
+    renderSearchResults();
+    setStatus('検索する工事を選択してください。');
+    return;
+  }
+
+  try {
+    if (state.search.cacheProjectC2 !== state.search.projectC2) {
+      setBusy('loading', `工事 ${state.search.projectC2} の検索用データを読み込んでいます。`);
+      state.search.cacheRows = await loadProjectSymbols(state.env, state.search.projectC2);
+      state.search.cacheProjectC2 = state.search.projectC2;
+    } else {
+      setBusy('loading', '検索条件を絞り込んでいます。');
+    }
+
+    const keyword = normalizeText(state.search.keyword);
+    const floor = normalizeText(state.search.floor);
+    const insideOutside = normalizeText(state.search.insideOutside);
+
+    state.search.results = state.search.cacheRows.filter((row) => {
+      const keywordOk = !keyword || normalizeText([
+        row.drawingNumber,
+        row.symbol,
+        row.name,
+        row.floor,
+        row.insideOutside,
+        row.bakeColor,
+        row.drawingStatus
+      ].join(' ')).includes(keyword);
+      const floorOk = !floor || normalizeText(row.floor).includes(floor);
+      const inoutOk = !insideOutside || normalizeText(row.insideOutside).includes(insideOutside);
+      return keywordOk && floorOk && inoutOk;
+    });
+
+    state.search.resultCountText = `${state.search.results.length}件`;
+    state.search.hint = `${state.search.projectC2} の中だけを検索しています。`;
+    renderSearchResults();
+    setStatus(`${state.search.results.length}件の検索結果を表示しました。`);
+  } catch (error) {
+    console.error(error);
+    state.search.results = [];
+    state.search.resultCountText = '0件';
+    state.search.hint = '検索中にエラーが発生しました。';
+    renderSearchResults();
+    setStatus(`検索に失敗しました: ${error.message}`);
+  }
+}
+
+async function openSearchResult(index) {
+  const result = state.search.results[Number(index)];
+  if (!result) {
+    return;
+  }
+
+  await selectProject(result.c2);
+  state.selectedDrawingId = result.drawingId || '';
+  state.drawing = {
+    id: result.drawingId || '',
+    drawingNumber: result.drawingNumber || '',
+    drawingStatus: result.drawingStatus || ''
+  };
+  updateFormInputs();
+  await loadCurrentDrawing();
+  setActiveMode('editor');
+}
+
 function bindEvents() {
+  elements.sidebarToggle.addEventListener('click', toggleSidebar);
+
+  elements.navItems.forEach((item) => {
+    item.addEventListener('click', () => setActiveMode(item.dataset.mode));
+  });
+
   elements.projectSelect.addEventListener('change', async () => {
     await selectProject(elements.projectSelect.value);
   });
@@ -464,7 +679,18 @@ function bindEvents() {
     state.filterText = elements.filterInput.value;
     renderRows();
   });
-  elements.printButton.addEventListener('click', () => window.print());
+
+  elements.searchProjectSelect.addEventListener('change', () => {
+    syncSearchFromForm();
+  });
+  elements.searchKeywordInput.addEventListener('input', syncSearchFromForm);
+  elements.searchFloorInput.addEventListener('input', syncSearchFromForm);
+  elements.searchInsideOutsideInput.addEventListener('input', syncSearchFromForm);
+  elements.searchButton.addEventListener('click', performSearch);
+  elements.printButton.addEventListener('click', () => {
+    setActiveMode('report');
+    window.print();
+  });
 
   elements.drawingTabs.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-drawing-id]');
@@ -495,7 +721,7 @@ function bindEvents() {
       return;
     }
     row[input.dataset.fieldKey] = input.value;
-    renderSummary(state.rows.filter(matchesFilter));
+    renderReport();
   });
 
   elements.tableBody.addEventListener('change', (event) => {
@@ -521,6 +747,14 @@ function bindEvents() {
     renderRows();
   });
 
+  elements.searchResultsBody.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-open-search-result]');
+    if (!button) {
+      return;
+    }
+    await openSearchResult(button.dataset.openSearchResult);
+  });
+
   [
     elements.projectC2Input,
     elements.projectNameInput,
@@ -532,7 +766,7 @@ function bindEvents() {
     input.addEventListener('input', () => {
       syncProjectFromForm();
       syncDrawingFromForm();
-      renderSummary(state.rows.filter(matchesFilter));
+      renderReport();
     });
   });
 }
@@ -540,12 +774,14 @@ function bindEvents() {
 function renderInitialState() {
   renderTableHead();
   state.rows = [createUiRow()];
+  renderSearchResults();
   renderAll();
 }
 
 async function bootstrap() {
   renderInitialState();
   bindEvents();
+  setActiveMode(state.activeMode);
   setStatus('Firestore 版を初期化しました。');
   await refreshProjects();
 }
