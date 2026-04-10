@@ -1,4 +1,4 @@
-import { GoogleAIBackend, getAI, getGenerativeModel } from 'firebase/ai';
+import { GoogleAIBackend, Schema, getAI, getGenerativeModel } from 'firebase/ai';
 import { app, firebaseConfig } from './firebase.js';
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
@@ -92,6 +92,9 @@ function toFriendlyError(error) {
   if (status === 403) {
     return new Error(`Firebase AI Logic の利用設定を確認してください: ${AI_LOGIC_SETUP_URL}`);
   }
+  if (status === 400) {
+    return new Error('AIへの送信内容に問題がありました。アプリ側を修正しましたので、もう一度試してください。');
+  }
   if (error instanceof Error) {
     return error;
   }
@@ -102,63 +105,62 @@ export function buildHandaiExtractionPrompt() {
   return [
     'You are reading a Japanese fabrication order PDF for doors and frames.',
     'Return only JSON that matches the requested schema.',
-    'Extract project information, the current drawing/order number, the drawing status, and every symbol row.',
+    'Extract project information, the current drawing or order number, the drawing status, and every symbol row.',
     'Keep each symbol as one row.',
     'If a value is missing, return an empty string.',
     'Use the drawing number exactly as written, including values like 1-1 or 1-2.',
     'Use shortName for the label-friendly site abbreviation.',
-    'drawingStatus should be short text such as 外部, 内部, 共通, 未定.',
-    'Rows should include manufacturing columns like W, H, 枠見込, DW, DH, 内外, 焼付色, GW/RW density and thickness, labels, and dates whenever found.',
+    'drawingStatus should be short text such as 外部, 内部, 共通, or 未定.',
+    'Rows should include manufacturing columns like W, H, frame depth, DW, DH, inside or outside, bake color, GW or RW density and thickness, label counts, and dates whenever found.',
     'If something is uncertain, still return your best effort and note the issue in errors.',
     'Do not include markdown fences.',
     'JSON root keys must be: project, drawing, rows, errors.'
   ].join('\n');
 }
 
+function stringField(description) {
+  return Schema.string({
+    description,
+    nullable: true
+  });
+}
+
 export function buildHandaiExtractionSchema() {
-  return {
-    type: 'object',
-    additionalProperties: false,
+  const rowProperties = FIELD_KEYS.reduce((acc, key) => {
+    acc[key] = stringField(`${key} field.`);
+    return acc;
+  }, {});
+
+  return Schema.object({
     properties: {
-      project: {
-        type: 'object',
-        additionalProperties: false,
+      project: Schema.object({
         properties: {
-          c2: { type: 'string', description: 'Project code.' },
-          projectName: { type: 'string', description: 'Project name.' },
-          shortName: { type: 'string', description: 'Short label-friendly project name.' },
-          contact: { type: 'string', description: 'Operator or contact name.' }
+          c2: stringField('Project code.'),
+          projectName: stringField('Project name.'),
+          shortName: stringField('Short label-friendly project name.'),
+          contact: stringField('Operator or contact name.')
         },
-        required: ['c2', 'projectName', 'shortName', 'contact']
-      },
-      drawing: {
-        type: 'object',
-        additionalProperties: false,
+        optionalProperties: ['c2', 'projectName', 'shortName', 'contact']
+      }),
+      drawing: Schema.object({
         properties: {
-          drawingNumber: { type: 'string', description: 'Drawing or order number.' },
-          drawingStatus: { type: 'string', description: 'Drawing status like 外部 or 内部.' }
+          drawingNumber: stringField('Drawing or order number.'),
+          drawingStatus: stringField('Drawing status like 外部 or 内部.')
         },
-        required: ['drawingNumber', 'drawingStatus']
-      },
-      rows: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: FIELD_KEYS.reduce((acc, key) => {
-            acc[key] = { type: 'string', description: `${key} field.` };
-            return acc;
-          }, {}),
-          required: FIELD_KEYS
-        }
-      },
-      errors: {
-        type: 'array',
-        items: { type: 'string' }
-      }
+        optionalProperties: ['drawingNumber', 'drawingStatus']
+      }),
+      rows: Schema.array({
+        items: Schema.object({
+          properties: rowProperties,
+          optionalProperties: FIELD_KEYS
+        })
+      }),
+      errors: Schema.array({
+        items: stringField('Extraction warning or note.')
+      })
     },
-    required: ['project', 'drawing', 'rows', 'errors']
-  };
+    optionalProperties: ['project', 'drawing', 'rows', 'errors']
+  });
 }
 
 function normalizeExtraction(data) {
