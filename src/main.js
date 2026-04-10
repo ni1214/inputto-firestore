@@ -1,9 +1,9 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
-import { firestoreModel, listProjects, loadProjectBundle, loadDrawingRows, saveDrawingBundle } from './store.js';
+import { listProjects, loadProjectBundle, loadDrawingRows, saveDrawingBundle } from './store.js';
 
 const state = {
-  env: 'test',
+  env: 'production',
   operator: localStorage.getItem('inputto_operator') || '',
   loading: false,
   saving: false,
@@ -18,7 +18,6 @@ const state = {
 };
 
 const elements = {
-  envToggle: document.getElementById('envToggle'),
   operatorNameInput: document.getElementById('operatorNameInput'),
   busyState: document.getElementById('busyState'),
   statusText: document.getElementById('statusText'),
@@ -32,7 +31,6 @@ const elements = {
   projectContactInput: document.getElementById('projectContactInput'),
   drawingNumberInput: document.getElementById('drawingNumberInput'),
   drawingStatusInput: document.getElementById('drawingStatusInput'),
-  newDrawingButton: document.getElementById('newDrawingButton'),
   loadDrawingButton: document.getElementById('loadDrawingButton'),
   drawingTabs: document.getElementById('drawingTabs'),
   filterInput: document.getElementById('filterInput'),
@@ -113,7 +111,7 @@ function renderDrawingTabs() {
     return;
   }
   if (!state.drawings.length) {
-    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ図面がありません。図面番号を入れて「図面を開く」で新規作成できます。</p>';
+    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ図面がありません。図面番号を入れて読込すると、新しい図面として入力できます。</p>';
     return;
   }
 
@@ -292,7 +290,7 @@ async function refreshProjects() {
   try {
     state.projects = await listProjects(state.env);
     renderProjectSelect();
-    setStatus(`工事一覧を更新しました。${firestoreModel.projectPath}`);
+    setStatus('工事一覧を更新しました。');
   } catch (error) {
     console.error(error);
     setStatus(`工事一覧の読込に失敗しました: ${error.message}`);
@@ -339,20 +337,25 @@ async function loadCurrentDrawing() {
   }
 
   const drawing = state.drawings.find((item) => item.drawingNumber === state.drawing.drawingNumber);
-  const drawingId = drawing?.id || state.selectedDrawingId || '';
+  const drawingId = drawing?.id || '';
 
   setBusy('loading', `${state.drawing.drawingNumber} の符号を読み込んでいます。`);
   try {
     state.selectedDrawingId = drawingId;
     state.drawing = {
-      ...state.drawing,
-      id: drawingId
+      id: drawingId,
+      drawingNumber: state.drawing.drawingNumber,
+      drawingStatus: drawing?.drawingStatus || state.drawing.drawingStatus || ''
     };
     state.rows = drawingId ? await loadDrawingRows(state.env, state.project.c2, drawingId) : [];
     state.rows = state.rows.length ? state.rows : [createUiRow()];
     state.selectedRowIds = new Set();
     renderAll();
-    setStatus(`${state.drawing.drawingNumber} を開きました。`);
+    if (drawingId) {
+      setStatus(`図面 ${state.drawing.drawingNumber} を読み込みました。`);
+    } else {
+      setStatus(`図面 ${state.drawing.drawingNumber} は未登録です。そのまま入力して保存できます。`);
+    }
   } catch (error) {
     console.error(error);
     setStatus(`図面の読込に失敗しました: ${error.message}`);
@@ -448,17 +451,6 @@ function deleteSelectedRows() {
 }
 
 function bindEvents() {
-  elements.envToggle.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-env]');
-    if (!button) {
-      return;
-    }
-    state.env = button.dataset.env;
-    elements.envToggle.querySelectorAll('button').forEach((item) => item.classList.toggle('is-active', item === button));
-    clearProjectState();
-    await refreshProjects();
-  });
-
   elements.operatorNameInput.addEventListener('input', () => {
     state.operator = elements.operatorNameInput.value.trim();
     localStorage.setItem('inputto_operator', state.operator);
@@ -474,15 +466,6 @@ function bindEvents() {
     elements.projectSelect.value = '';
     elements.projectC2Input.focus();
     setStatus('新規工事入力に切り替えました。');
-  });
-  elements.newDrawingButton.addEventListener('click', () => {
-    state.selectedDrawingId = '';
-    state.drawing = { ...DRAWING_TEMPLATE };
-    state.rows = [createUiRow()];
-    state.selectedRowIds = new Set();
-    renderAll();
-    elements.drawingNumberInput.focus();
-    setStatus('新規図面入力に切り替えました。');
   });
   elements.loadDrawingButton.addEventListener('click', loadCurrentDrawing);
   elements.saveButton.addEventListener('click', saveCurrent);

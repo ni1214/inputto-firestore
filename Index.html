@@ -18,10 +18,6 @@
           <p class="subtle">工事ごとに必要な図面と符号だけを読み込み、Firestore の読み取りを絞る構成です。</p>
         </div>
         <div class="topbar-actions">
-          <div class="env-toggle" id="envToggle">
-            <button type="button" data-env="test" class="is-active">テスト</button>
-            <button type="button" data-env="production">本番</button>
-          </div>
           <label class="inline-field">
             <span>作業者</span>
             <input id="operatorNameInput" type="text" placeholder="例: 高林">
@@ -86,16 +82,12 @@
           <div class="section-head">
             <div>
               <h2>図面</h2>
-              <p class="subtle">図面を開いた時だけその図面の符号を読み込みます。</p>
+              <p class="subtle">図面番号を入れて読込。未登録ならそのまま新規入力できます。</p>
             </div>
             <div class="cluster">
-              <button id="newDrawingButton" type="button" class="ghost-button">
-                <span class="material-symbols-outlined">post_add</span>
-                <span>新規図面</span>
-              </button>
               <button id="loadDrawingButton" type="button" class="tonal-button">
                 <span class="material-symbols-outlined">folder_open</span>
-                <span>図面を開く</span>
+                <span>読込</span>
               </button>
             </div>
           </div>
