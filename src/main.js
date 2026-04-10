@@ -2,9 +2,10 @@ import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
 import { listProjects, loadProjectBundle, loadDrawingRows, saveDrawingBundle } from './store.js';
 
+const SAVE_ACTOR = 'system';
+
 const state = {
   env: 'production',
-  operator: localStorage.getItem('inputto_operator') || '',
   loading: false,
   saving: false,
   projects: [],
@@ -18,7 +19,6 @@ const state = {
 };
 
 const elements = {
-  operatorNameInput: document.getElementById('operatorNameInput'),
   busyState: document.getElementById('busyState'),
   statusText: document.getElementById('statusText'),
   projectSelect: document.getElementById('projectSelect'),
@@ -77,7 +77,6 @@ function setStatus(message) {
 }
 
 function updateFormInputs() {
-  elements.operatorNameInput.value = state.operator;
   elements.projectC2Input.value = state.project.c2 || '';
   elements.projectNameInput.value = state.project.projectName || '';
   elements.projectShortNameInput.value = state.project.shortName || '';
@@ -366,12 +365,6 @@ async function saveCurrent() {
   syncProjectFromForm();
   syncDrawingFromForm();
 
-  if (!state.operator.trim()) {
-    setStatus('作業者名を入れてください。');
-    elements.operatorNameInput.focus();
-    return;
-  }
-
   setBusy('saving', '保存しています。');
   try {
     const response = await saveDrawingBundle({
@@ -379,7 +372,7 @@ async function saveCurrent() {
       project: state.project,
       drawing: { ...state.drawing, id: state.selectedDrawingId },
       rows: state.rows,
-      operator: state.operator
+      operator: SAVE_ACTOR
     });
 
     state.project = {
@@ -451,11 +444,6 @@ function deleteSelectedRows() {
 }
 
 function bindEvents() {
-  elements.operatorNameInput.addEventListener('input', () => {
-    state.operator = elements.operatorNameInput.value.trim();
-    localStorage.setItem('inputto_operator', state.operator);
-  });
-
   elements.projectSelect.addEventListener('change', async () => {
     await selectProject(elements.projectSelect.value);
   });
