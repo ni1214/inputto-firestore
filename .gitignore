@@ -1,0 +1,14 @@
+node_modules/
+.firebase/
+.npm-cache/
+firebase-debug.log
+*.gs
+Index.html
+Scripts.html
+Styles.html
+appsscript.json
+Enable-Utf8Console.ps1
+tmp_*
+.tmp*
+_check_*
+_scripts_check.js

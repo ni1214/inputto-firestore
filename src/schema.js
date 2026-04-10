@@ -1,0 +1,83 @@
+export const PROJECT_TEMPLATE = {
+  c2: '',
+  projectName: '',
+  shortName: '',
+  contact: ''
+};
+
+export const DRAWING_TEMPLATE = {
+  drawingNumber: '',
+  drawingStatus: ''
+};
+
+export const ROW_TEMPLATE = {
+  uiId: '',
+  docId: '',
+  symbol: '',
+  name: '',
+  floor: '',
+  left: '',
+  right: '',
+  doubleLeft: '',
+  doubleRight: '',
+  noHand: '',
+  width: '',
+  height: '',
+  frameDepth: '',
+  dwLeft: '',
+  dwRight: '',
+  dh: '',
+  insideOutside: '',
+  labelCount: '',
+  labelRightCount: '',
+  labelDoubleCount: '',
+  labelNoHandCount: '',
+  bakeColor: '',
+  floorQuantity: '',
+  gwDensity: '',
+  gwThickness: '',
+  rwDensity: '',
+  rwThickness: '',
+  draftAssignee: '',
+  draftFrameAt: '',
+  draftDoorAt: '',
+  assemblyFrameCompletedAt: '',
+  assemblyDoorCompletedAt: '',
+  frameShipDate: '',
+  doorShipDate: ''
+};
+
+export const FIELD_DEFS = [
+  { key: 'symbol', label: '符号', required: true, width: '12rem' },
+  { key: 'name', label: '品名', width: '12rem' },
+  { key: 'floor', label: 'フロア', width: '8rem' },
+  { key: 'left', label: 'L', type: 'number', width: '5rem' },
+  { key: 'right', label: 'R', type: 'number', width: '5rem' },
+  { key: 'doubleLeft', label: '両開き_L親', type: 'number', width: '7rem' },
+  { key: 'doubleRight', label: '両開き_R親', type: 'number', width: '7rem' },
+  { key: 'noHand', label: '勝手なし', type: 'number', width: '7rem' },
+  { key: 'width', label: 'W', type: 'number', width: '6rem' },
+  { key: 'height', label: 'H', type: 'number', width: '6rem' },
+  { key: 'frameDepth', label: '枠見込', type: 'number', width: '6rem' },
+  { key: 'dwLeft', label: 'DW(L)', type: 'number', width: '7rem' },
+  { key: 'dwRight', label: 'DW(R)', type: 'number', width: '7rem' },
+  { key: 'dh', label: 'DH', type: 'number', width: '6rem' },
+  { key: 'insideOutside', label: '内外', width: '7rem' },
+  { key: 'labelCount', label: 'ラベル枚数', type: 'number', width: '7rem' },
+  { key: 'labelRightCount', label: 'R', type: 'number', width: '5rem' },
+  { key: 'labelDoubleCount', label: '両', type: 'number', width: '5rem' },
+  { key: 'labelNoHandCount', label: '勝手なし', type: 'number', width: '7rem' },
+  { key: 'bakeColor', label: '焼付色', width: '8rem' },
+  { key: 'floorQuantity', label: 'フロアごとの数量', type: 'number', width: '8rem' },
+  { key: 'gwDensity', label: 'GW密度', type: 'number', width: '7rem' },
+  { key: 'gwThickness', label: 'GW厚み', type: 'number', width: '7rem' },
+  { key: 'rwDensity', label: 'RW密度', type: 'number', width: '7rem' },
+  { key: 'rwThickness', label: 'RW厚み', type: 'number', width: '7rem' },
+  { key: 'draftAssignee', label: 'バラ図担当', width: '8rem' },
+  { key: 'draftFrameAt', label: 'バラ図_枠', type: 'date', width: '9rem' },
+  { key: 'draftDoorAt', label: 'バラ図_扉', type: 'date', width: '9rem' },
+  { key: 'assemblyFrameCompletedAt', label: '組立完了日_枠', type: 'date', width: '10rem' },
+  { key: 'assemblyDoorCompletedAt', label: '組立完了日_扉', type: 'date', width: '10rem' },
+  { key: 'frameShipDate', label: '枠出荷日', type: 'date', width: '9rem' },
+  { key: 'doorShipDate', label: '扉出荷日', type: 'date', width: '9rem' }
+];
