@@ -94,7 +94,7 @@ function renderProjectSelect() {
       state.projects.map((project) => {
         const label = [project.projectName || '-', `工事 ${project.c2}`];
         if (project.drawingCount || project.symbolCount) {
-          label.push(`図面 ${project.drawingCount || 0}件 / 符号 ${project.symbolCount || 0}件`);
+          label.push(`手配書 ${project.drawingCount || 0}件 / 符号 ${project.symbolCount || 0}件`);
         }
         const selected = currentValue && currentValue === project.c2 ? ' selected' : '';
         return `<option value="${escapeHtml(project.c2)}"${selected}>${escapeHtml(label.join(' / '))}</option>`;
@@ -107,11 +107,11 @@ function renderProjectSelect() {
 
 function renderDrawingTabs() {
   if (!state.project.c2) {
-    elements.drawingTabs.innerHTML = '<p class="empty-text">工事を選ぶと図面タブが出ます。</p>';
+    elements.drawingTabs.innerHTML = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
     return;
   }
   if (!state.drawings.length) {
-    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ図面がありません。図面番号を入れて読込すると、新しい図面として入力できます。</p>';
+    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ手配書がありません。手配書Noを入れて読込すると、新しい手配書として入力できます。</p>';
     return;
   }
 
@@ -148,7 +148,7 @@ function matchesFilter(row) {
 
 function buildLabelItems(rows) {
   const shortName = state.project.shortName || state.project.projectName || '未設定';
-  const drawingLabel = state.drawing.drawingNumber ? `図面 ${state.drawing.drawingNumber}` : '';
+  const drawingLabel = state.drawing.drawingNumber ? `手配書 ${state.drawing.drawingNumber}` : '';
   const labels = [];
 
   rows.forEach((row) => {
@@ -332,14 +332,14 @@ async function loadCurrentDrawing() {
     return;
   }
   if (!state.drawing.drawingNumber) {
-    setStatus('図面番号を入れてください。');
+    setStatus('手配書Noを入れてください。');
     return;
   }
 
   const drawing = state.drawings.find((item) => item.drawingNumber === state.drawing.drawingNumber);
   const drawingId = drawing?.id || '';
 
-  setBusy('loading', `${state.drawing.drawingNumber} の符号を読み込んでいます。`);
+  setBusy('loading', `手配書No ${state.drawing.drawingNumber} の符号を読み込んでいます。`);
   try {
     state.selectedDrawingId = drawingId;
     state.drawing = {
@@ -352,13 +352,13 @@ async function loadCurrentDrawing() {
     state.selectedRowIds = new Set();
     renderAll();
     if (drawingId) {
-      setStatus(`図面 ${state.drawing.drawingNumber} を読み込みました。`);
+      setStatus(`登録済みの手配書No ${state.drawing.drawingNumber} を読み込みました。`);
     } else {
-      setStatus(`図面 ${state.drawing.drawingNumber} は未登録です。そのまま入力して保存できます。`);
+      setStatus(`手配書No ${state.drawing.drawingNumber} は未登録です。そのまま入力して保存できます。`);
     }
   } catch (error) {
     console.error(error);
-    setStatus(`図面の読込に失敗しました: ${error.message}`);
+    setStatus(`手配書の読込に失敗しました: ${error.message}`);
   }
 }
 
