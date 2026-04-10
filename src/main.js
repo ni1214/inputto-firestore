@@ -1,12 +1,7 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
 import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle, saveDrawingSymbolBatch } from './store.js';
-import {
-  clearStoredGeminiApiKey,
-  extractHandaiDataFromPdf,
-  loadStoredGeminiApiKey,
-  saveGeminiApiKey
-} from './gemini.js';
+import { extractHandaiDataFromPdf } from './gemini.js';
 
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
@@ -19,7 +14,6 @@ const state = {
   sidebarCollapsed: localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true',
   loading: false,
   saving: false,
-  geminiApiKey: loadStoredGeminiApiKey(),
   projects: [],
   project: { ...PROJECT_TEMPLATE },
   drawings: [],
@@ -60,10 +54,9 @@ const elements = {
   bulkSymbolsInput: document.getElementById('bulkSymbolsInput'),
   applyBulkSymbolsButton: document.getElementById('applyBulkSymbolsButton'),
   clearBulkSymbolsButton: document.getElementById('clearBulkSymbolsButton'),
-  pdfDropZone: document.getElementById('pdfDropZone'),
-  pdfDropHint: document.getElementById('pdfDropHint'),
+  pickPdfButton: document.getElementById('pickPdfButton'),
   pdfFileInput: document.getElementById('pdfFileInput'),
-  setGeminiKeyButton: document.getElementById('setGeminiKeyButton'),
+  appDropOverlay: document.getElementById('appDropOverlay'),
   filterInput: document.getElementById('filterInput'),
   addRowButton: document.getElementById('addRowButton'),
   duplicateRowButton: document.getElementById('duplicateRowButton'),
@@ -90,6 +83,7 @@ const elements = {
 
 let autoSaveTimerId = null;
 let lastSavedSignature = '';
+let appDragDepth = 0;
 
 function createUiRow(overrides = {}) {
   return {
@@ -500,42 +494,63 @@ function clearBulkSymbols() {
   showToast('一括入力を空にしました。');
 }
 
-function promptForGeminiKey() {
-  const nextKey = window.prompt('Gemini APIキーを入力してください', state.geminiApiKey || '');
-  if (nextKey === null) {
+function isPdfFile(file) {
+  if (!file) {
+    return false;
+  }
+  return file.type === 'application/pdf' || /\.pdf$/i.test(String(file.name || ''));
+}
+
+function showAppDropOverlay() {
+  if (!elements.appDropOverlay) {
     return;
   }
-  if (!String(nextKey).trim()) {
-    clearStoredGeminiApiKey();
-    state.geminiApiKey = '';
-    showToast('Gemini APIキーを削除しました。');
+  elements.appDropOverlay.hidden = false;
+  window.requestAnimationFrame(() => {
+    elements.appDropOverlay?.classList.add('is-active');
+  });
+}
+
+function hideAppDropOverlay() {
+  if (!elements.appDropOverlay) {
     return;
   }
-  const savedKey = saveGeminiApiKey(nextKey);
-  state.geminiApiKey = savedKey;
-  showToast('Gemini APIキーを保存しました。', 'success');
+  elements.appDropOverlay.classList.remove('is-active');
+  window.setTimeout(() => {
+    if (!elements.appDropOverlay?.classList.contains('is-active')) {
+      elements.appDropOverlay.hidden = true;
+    }
+  }, 180);
+}
+
+function resetAppDropState() {
+  appDragDepth = 0;
+  hideAppDropOverlay();
+}
+
+function isFileDragEvent(event) {
+  const types = Array.from(event.dataTransfer?.types || []);
+  return types.includes('Files');
+}
+
+function getPdfFromFileList(fileList) {
+  return Array.from(fileList || []).find((file) => isPdfFile(file)) || null;
 }
 
 async function handlePdfImport(file) {
   if (!file) {
     return;
   }
-
-  if (!state.geminiApiKey) {
-    const nextKey = window.prompt('Gemini APIキーを入力してください');
-    if (!nextKey) {
-      showToast('Gemini APIキーがないためPDFを読み込めません。', 'error');
-      return;
-    }
-    state.geminiApiKey = saveGeminiApiKey(nextKey);
+  if (!isPdfFile(file)) {
+    showToast('PDFファイルを選んでください。', 'error');
+    return;
   }
 
-  setBusy('loading', 'PDFを解析しています...');
-  elements.pdfDropZone?.classList.add('is-busy');
+  setBusy('loading', 'PDFを解析しています。');
+  document.body.classList.add('is-importing-pdf');
+  elements.pickPdfButton?.setAttribute('disabled', 'disabled');
   try {
-    const extracted = await extractHandaiDataFromPdf(file, {
-      apiKey: state.geminiApiKey
-    });
+    const extracted = await extractHandaiDataFromPdf(file);
 
     const bundle = extracted.project.c2
       ? await loadProjectBundle(state.env, extracted.project.c2)
@@ -567,12 +582,14 @@ async function handlePdfImport(file) {
     setActiveMode('report');
     syncSavedSignature();
     scheduleAutoSave();
-    showToast('PDFの内容を読み込みました。', 'success');
+    showToast('PDFから入力しました。', 'success');
   } catch (error) {
     console.error(error);
-    showToast(`PDFの読み込みに失敗しました: ${error.message}`, 'error');
+    showToast(`PDFの読込に失敗しました: ${error.message}`, 'error');
   } finally {
-    elements.pdfDropZone?.classList.remove('is-busy');
+    elements.pickPdfButton?.removeAttribute('disabled');
+    document.body.classList.remove('is-importing-pdf');
+    resetAppDropState();
     setBusy('', '');
   }
 }
@@ -1121,33 +1138,58 @@ function bindEvents() {
     await openSearchResult(button.dataset.openSearchResult);
   });
 
-  elements.setGeminiKeyButton.addEventListener('click', promptForGeminiKey);
-
-  elements.pdfDropZone.addEventListener('click', () => {
+  elements.pickPdfButton.addEventListener('click', () => {
     elements.pdfFileInput.click();
   });
-  elements.pdfDropZone.addEventListener('dragenter', (event) => {
+
+  document.addEventListener('dragenter', (event) => {
+    if (!isFileDragEvent(event)) {
+      return;
+    }
     event.preventDefault();
-    elements.pdfDropZone.classList.add('is-dragover');
+    appDragDepth += 1;
+    showAppDropOverlay();
   });
-  elements.pdfDropZone.addEventListener('dragover', (event) => {
+
+  document.addEventListener('dragover', (event) => {
+    if (!isFileDragEvent(event)) {
+      return;
+    }
     event.preventDefault();
-    elements.pdfDropZone.classList.add('is-dragover');
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    showAppDropOverlay();
   });
-  elements.pdfDropZone.addEventListener('dragleave', () => {
-    elements.pdfDropZone.classList.remove('is-dragover');
-  });
-  elements.pdfDropZone.addEventListener('drop', async (event) => {
-    event.preventDefault();
-    elements.pdfDropZone.classList.remove('is-dragover');
-    const file = event.dataTransfer?.files?.[0];
-    if (file) {
-      await handlePdfImport(file);
+
+  document.addEventListener('dragleave', (event) => {
+    if (!isFileDragEvent(event)) {
+      return;
+    }
+    appDragDepth = Math.max(0, appDragDepth - 1);
+    if (appDragDepth === 0) {
+      hideAppDropOverlay();
     }
   });
 
+  document.addEventListener('drop', async (event) => {
+    if (!isFileDragEvent(event)) {
+      return;
+    }
+    event.preventDefault();
+    const file = getPdfFromFileList(event.dataTransfer?.files);
+    resetAppDropState();
+    if (file) {
+      await handlePdfImport(file);
+      return;
+    }
+    showToast('PDFファイルをドロップしてください。', 'error');
+  });
+
+  window.addEventListener('blur', resetAppDropState);
+
   elements.pdfFileInput.addEventListener('change', async () => {
-    const file = elements.pdfFileInput.files?.[0];
+    const file = getPdfFromFileList(elements.pdfFileInput.files);
     if (file) {
       await handlePdfImport(file);
     }

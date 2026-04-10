@@ -1,7 +1,10 @@
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_UPLOAD_BASE = 'https://generativelanguage.googleapis.com/upload/v1beta';
-const GEMINI_API_KEY_STORAGE_KEY = 'inputto_gemini_api_key';
+import { GoogleAIBackend, getAI, getGenerativeModel } from 'firebase/ai';
+import { app, firebaseConfig } from './firebase.js';
+
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const MAX_GENERATION_ATTEMPTS = 3;
+const RETRIABLE_STATUS_CODES = new Set([429, 500, 503, 504]);
+const AI_LOGIC_SETUP_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/ailogic/`;
 
 const FIELD_KEYS = [
   'symbol',
@@ -38,9 +41,7 @@ const FIELD_KEYS = [
   'doorShipDate'
 ];
 
-function hasLocalStorage() {
-  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-}
+const ai = getAI(app, { backend: new GoogleAIBackend() });
 
 function cleanText(value) {
   return String(value ?? '')
@@ -48,56 +49,69 @@ function cleanText(value) {
     .trim();
 }
 
-function cleanKey(value) {
-  return cleanText(value).replace(/\s+/g, '');
-}
-
 function stripJsonFence(value) {
   const text = cleanText(value);
   if (!text.startsWith('```')) {
     return text;
   }
-  return text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```$/i, '')
-    .trim();
+  return text.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
 }
 
-export function loadStoredGeminiApiKey() {
-  if (!hasLocalStorage()) {
-    return '';
-  }
-  return cleanKey(window.localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY));
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-export function saveGeminiApiKey(apiKey) {
-  const key = cleanKey(apiKey);
-  if (!key) {
-    throw new Error('Gemini API key is empty.');
+function getErrorStatus(error) {
+  const directStatus = Number(error?.customErrorData?.status);
+  if (Number.isFinite(directStatus) && directStatus > 0) {
+    return directStatus;
   }
-  if (!hasLocalStorage()) {
-    return key;
-  }
-  window.localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, key);
-  return key;
+
+  const message = String(error?.message || '');
+  const matched = message.match(/\[(\d{3})\s+[^\]]+\]/);
+  return matched ? Number(matched[1]) : 0;
 }
 
-export function clearStoredGeminiApiKey() {
-  if (hasLocalStorage()) {
-    window.localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
+function isRetriableError(error) {
+  return RETRIABLE_STATUS_CODES.has(getErrorStatus(error));
+}
+
+function toFriendlyError(error) {
+  const code = String(error?.code || '');
+  const status = getErrorStatus(error);
+
+  if (code.includes('api-not-enabled')) {
+    return new Error(`Firebase AI Logic を有効にしてください: ${AI_LOGIC_SETUP_URL}`);
   }
+  if (status === 503) {
+    return new Error('AI側が混み合っているため読込できませんでした。少し待ってからもう一度試してください。');
+  }
+  if (status === 429) {
+    return new Error('AIの利用回数が集中しています。少し待ってから再実行してください。');
+  }
+  if (status === 403) {
+    return new Error(`Firebase AI Logic の利用設定を確認してください: ${AI_LOGIC_SETUP_URL}`);
+  }
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error('PDFの解析に失敗しました。');
 }
 
 export function buildHandaiExtractionPrompt() {
   return [
-    'あなたは日本語の手配依頼書や図面台帳を読み取る業務アシスタントです。',
-    '添付されたPDFから、工事情報と手配書ごとの符号一覧を読み取り、次のJSONだけを返してください。',
-    '不明な値は空文字にしてください。推測が必要な場合は、推測した値を入れたうえで errors に短く理由を入れてください。',
-    '手配書No が 1-1 / 1-2 のように分割されている場合は、その表記をそのまま drawing.drawingNumber に入れてください。',
-    '符号は 1 行 1 件で rows に入れてください。読み取れた列はできるだけ埋めてください。',
-    '工事名の正式名と略称が両方わかるなら両方入れてください。略称はラベルに載せる短い名称です。',
-    '手配書の状態は drawing.drawingStatus に入れてください。内部 / 外部 / 変更後 / 未登録 など、PDFにある表記を優先してください。',
-    '返却JSONの最上位キーは project, drawing, rows, errors です。'
+    'You are reading a Japanese fabrication order PDF for doors and frames.',
+    'Return only JSON that matches the requested schema.',
+    'Extract project information, the current drawing/order number, the drawing status, and every symbol row.',
+    'Keep each symbol as one row.',
+    'If a value is missing, return an empty string.',
+    'Use the drawing number exactly as written, including values like 1-1 or 1-2.',
+    'Use shortName for the label-friendly site abbreviation.',
+    'drawingStatus should be short text such as 外部, 内部, 共通, 未定.',
+    'Rows should include manufacturing columns like W, H, 枠見込, DW, DH, 内外, 焼付色, GW/RW density and thickness, labels, and dates whenever found.',
+    'If something is uncertain, still return your best effort and note the issue in errors.',
+    'Do not include markdown fences.',
+    'JSON root keys must be: project, drawing, rows, errors.'
   ].join('\n');
 }
 
@@ -110,10 +124,10 @@ export function buildHandaiExtractionSchema() {
         type: 'object',
         additionalProperties: false,
         properties: {
-          c2: { type: 'string', description: '工事番号。' },
-          projectName: { type: 'string', description: '工事の正式名称。' },
-          shortName: { type: 'string', description: 'ラベル用の略称。' },
-          contact: { type: 'string', description: '担当者名。' }
+          c2: { type: 'string', description: 'Project code.' },
+          projectName: { type: 'string', description: 'Project name.' },
+          shortName: { type: 'string', description: 'Short label-friendly project name.' },
+          contact: { type: 'string', description: 'Operator or contact name.' }
         },
         required: ['c2', 'projectName', 'shortName', 'contact']
       },
@@ -121,14 +135,13 @@ export function buildHandaiExtractionSchema() {
         type: 'object',
         additionalProperties: false,
         properties: {
-          drawingNumber: { type: 'string', description: '手配書No。' },
-          drawingStatus: { type: 'string', description: '手配書状態。' }
+          drawingNumber: { type: 'string', description: 'Drawing or order number.' },
+          drawingStatus: { type: 'string', description: 'Drawing status like 外部 or 内部.' }
         },
         required: ['drawingNumber', 'drawingStatus']
       },
       rows: {
         type: 'array',
-        description: '1行1符号の一覧。',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -177,203 +190,91 @@ function normalizeExtraction(data) {
   };
 }
 
-function getUploadHeaders(file) {
+async function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('PDFの読込に失敗しました。'));
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
+      if (!base64) {
+        reject(new Error('PDFをBase64へ変換できませんでした。'));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fileToInlineDataPart(file) {
+  if (!file) {
+    throw new Error('PDFファイルがありません。');
+  }
+
+  const mimeType = file.type || 'application/pdf';
+  const fileName = String(file.name || '');
+  if (mimeType !== 'application/pdf' && !/\.pdf$/i.test(fileName)) {
+    throw new Error('PDFファイルを選んでください。');
+  }
+
   return {
-    'Content-Type': 'application/json',
-    'X-Goog-Upload-Protocol': 'resumable',
-    'X-Goog-Upload-Command': 'start',
-    'X-Goog-Upload-Header-Content-Length': String(file.size),
-    'X-Goog-Upload-Header-Content-Type': file.type || 'application/pdf'
+    inlineData: {
+      mimeType: 'application/pdf',
+      data: await blobToBase64(file)
+    }
   };
 }
 
-async function startResumableUpload(file, apiKey, fetchImpl = fetch) {
-  const response = await fetchImpl(`${GEMINI_UPLOAD_BASE}/files?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: getUploadHeaders(file),
-    body: JSON.stringify({
-      file: {
-        display_name: file.name
-      }
-    })
-  });
+async function generateWithRetry({ prompt, pdfPart, modelName }) {
+  let lastError = null;
 
-  if (!response.ok) {
-    throw new Error(`Gemini upload start failed: ${response.status} ${response.statusText}`);
-  }
-
-  const uploadUrl =
-    response.headers.get('x-goog-upload-url') ||
-    response.headers.get('X-Goog-Upload-URL') ||
-    response.headers.get('x-goog-upload-url'.toLowerCase());
-
-  if (!uploadUrl) {
-    throw new Error('Gemini upload URL was not returned.');
-  }
-
-  return uploadUrl;
-}
-
-async function finalizeResumableUpload(file, uploadUrl, fetchImpl = fetch) {
-  const response = await fetchImpl(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize'
-    },
-    body: await file.arrayBuffer()
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini upload finalize failed: ${response.status} ${response.statusText}`);
-  }
-
-  const payload = await response.json();
-  const uploadedFile = payload?.file;
-  if (!uploadedFile) {
-    throw new Error('Gemini upload response did not include file metadata.');
-  }
-  return uploadedFile;
-}
-
-async function getFileMetadata(name, apiKey, fetchImpl = fetch) {
-  const response = await fetchImpl(`${GEMINI_API_BASE}/files/${encodeURIComponent(name)}?key=${encodeURIComponent(apiKey)}`);
-  if (!response.ok) {
-    throw new Error(`Gemini file lookup failed: ${response.status} ${response.statusText}`);
-  }
-  const payload = await response.json();
-  return payload?.file || payload;
-}
-
-async function waitForFileReady(fileInfo, apiKey, fetchImpl = fetch, timeoutMs = 120000, pollIntervalMs = 1500) {
-  const startedAt = Date.now();
-  let current = fileInfo;
-
-  while (true) {
-    const state = String(current?.state || '').toUpperCase();
-    if (!state || state === 'ACTIVE') {
-      return current;
-    }
-    if (state === 'FAILED') {
-      throw new Error('Gemini file processing failed.');
-    }
-    if (Date.now() - startedAt > timeoutMs) {
-      throw new Error('Timed out waiting for Gemini file processing.');
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    current = await getFileMetadata(current.name, apiKey, fetchImpl);
-  }
-}
-
-async function callGenerateContent({ apiKey, model, fileInfo, prompt, fetchImpl = fetch }) {
-  const response = await fetchImpl(`${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: prompt
-            },
-            {
-              file_data: {
-                mime_type: fileInfo.mimeType || 'application/pdf',
-                file_uri: fileInfo.uri
-              }
-            }
-          ]
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      const model = getGenerativeModel(ai, {
+        model: modelName,
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: 'application/json',
+          responseSchema: buildHandaiExtractionSchema()
         }
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseJsonSchema: buildHandaiExtractionSchema()
+      });
+      const result = await model.generateContent([prompt, pdfPart]);
+      return result.response.text();
+    } catch (error) {
+      lastError = error;
+      if (!isRetriableError(error) || attempt >= MAX_GENERATION_ATTEMPTS) {
+        break;
       }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini generation failed: ${response.status} ${response.statusText}`);
+      await wait(900 * attempt);
+    }
   }
 
-  return response.json();
-}
-
-function extractResponseText(payload) {
-  const candidate = payload?.candidates?.[0];
-  const parts = candidate?.content?.parts || [];
-  const text = parts
-    .map((part) => part?.text || '')
-    .join('')
-    .trim();
-  if (!text) {
-    throw new Error('Gemini response did not include text output.');
-  }
-  return text;
-}
-
-export async function uploadPdfToGeminiFile(file, apiKey = loadStoredGeminiApiKey(), options = {}) {
-  const resolvedKey = cleanKey(apiKey);
-  if (!resolvedKey) {
-    throw new Error('Gemini API key is required.');
-  }
-  if (!file) {
-    throw new Error('PDF file is required.');
-  }
-
-  const fetchImpl = options.fetchImpl || fetch;
-  const uploadUrl = await startResumableUpload(file, resolvedKey, fetchImpl);
-  const uploadedFile = await finalizeResumableUpload(file, uploadUrl, fetchImpl);
-  return waitForFileReady(
-    uploadedFile,
-    resolvedKey,
-    fetchImpl,
-    options.timeoutMs ?? 120000,
-    options.pollIntervalMs ?? 1500
-  );
+  throw toFriendlyError(lastError);
 }
 
 export async function extractHandaiDataFromPdf(file, options = {}) {
-  const apiKey = cleanKey(options.apiKey ?? loadStoredGeminiApiKey());
-  if (!apiKey) {
-    throw new Error('Gemini API key is required.');
+  const model = cleanText(options.model || DEFAULT_GEMINI_MODEL) || DEFAULT_GEMINI_MODEL;
+  const prompt = cleanText(options.prompt || buildHandaiExtractionPrompt()) || buildHandaiExtractionPrompt();
+  const pdfPart = await fileToInlineDataPart(file);
+  const text = stripJsonFence(await generateWithRetry({ prompt, pdfPart, modelName: model }));
+
+  try {
+    return normalizeExtraction(JSON.parse(text));
+  } catch (error) {
+    throw new Error(`AIの返答を読めませんでした: ${error.message}`);
   }
+}
 
-  const model = options.model || DEFAULT_GEMINI_MODEL;
-  const fetchImpl = options.fetchImpl || fetch;
-  const prompt = options.prompt || buildHandaiExtractionPrompt();
-
-  const uploadedFile = await uploadPdfToGeminiFile(file, apiKey, {
-    fetchImpl,
-    timeoutMs: options.timeoutMs,
-    pollIntervalMs: options.pollIntervalMs
-  });
-  const response = await callGenerateContent({
-    apiKey,
-    model,
-    fileInfo: uploadedFile,
-    prompt,
-    fetchImpl
-  });
-
-  const text = stripJsonFence(extractResponseText(response));
-  const parsed = normalizeExtraction(JSON.parse(text));
-
-  return parsed;
+export function getAiLogicSetupUrl() {
+  return AI_LOGIC_SETUP_URL;
 }
 
 export const geminiPdfExtraction = {
-  storageKey: GEMINI_API_KEY_STORAGE_KEY,
   defaultModel: DEFAULT_GEMINI_MODEL,
   fieldKeys: FIELD_KEYS,
   buildHandaiExtractionPrompt,
   buildHandaiExtractionSchema,
-  loadStoredGeminiApiKey,
-  saveGeminiApiKey,
-  clearStoredGeminiApiKey,
-  uploadPdfToGeminiFile,
-  extractHandaiDataFromPdf
+  extractHandaiDataFromPdf,
+  getAiLogicSetupUrl
 };

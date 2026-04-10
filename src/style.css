@@ -38,6 +38,12 @@ button {
   font-family: inherit;
 }
 
+button:disabled {
+  opacity: 0.62;
+  cursor: wait;
+  transform: none !important;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -359,37 +365,49 @@ h3 {
   color: rgba(255, 255, 255, 0.82);
 }
 
-.pdf-dropzone {
-  width: 100%;
-  justify-content: flex-start;
-  padding: 16px 18px;
-  border: 1px dashed #b8c8ef;
-  border-radius: 22px;
-  background: linear-gradient(180deg, #f8fbff, #eef4ff);
-  color: var(--primary);
-  text-align: left;
-}
-
-.pdf-dropzone.is-dragover {
-  border-color: var(--primary);
-  background: linear-gradient(180deg, #eef4ff, #dfe9ff);
-}
-
-.pdf-dropzone.is-busy {
-  opacity: 0.72;
-  pointer-events: none;
-}
-
-.pdf-drop-copy {
+.app-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
   display: grid;
-  gap: 2px;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 34, 61, 0.34);
+  backdrop-filter: blur(7px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
 }
 
-.pdf-drop-copy strong {
+.app-drop-overlay.is-active {
+  opacity: 1;
+}
+
+.app-drop-card {
+  min-width: min(34rem, calc(100vw - 48px));
+  max-width: min(42rem, calc(100vw - 48px));
+  padding: 30px 36px;
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(201, 215, 246, 0.9);
+  box-shadow: 0 24px 60px rgba(28, 48, 92, 0.26);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
   color: var(--text);
+  text-align: center;
 }
 
-.pdf-drop-copy small {
+.app-drop-card .material-symbols-outlined {
+  font-size: 54px;
+  color: var(--primary);
+}
+
+.app-drop-card strong {
+  font-size: 1.25rem;
+}
+
+.app-drop-card span:last-child {
   color: var(--muted);
 }
 
@@ -619,6 +637,7 @@ h3 {
   }
 
   .sidebar,
+  .app-drop-overlay,
   .toast-host,
   .mode-panel:not([data-mode-panel="report"]),
   .primary-button,

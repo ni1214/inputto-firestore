@@ -6,14 +6,16 @@
     <title>Inputto Firestore</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-DZ7jLbbF.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BOm8zncH.css">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
+      rel="stylesheet">
+    <script type="module" crossorigin src="./assets/index-BQemxnOn.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BuXnkUGR.css">
   </head>
   <body>
     <div class="app-shell" id="appShell">
-      <aside class="sidebar panel" id="sidebar">
-        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="メニューを折りたたむ">
+      <aside class="sidebar panel">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="メニューを切り替える">
           <span class="material-symbols-outlined">menu</span>
           <span class="sidebar-text">メニュー</span>
         </button>
@@ -21,7 +23,7 @@
         <nav class="sidebar-nav" aria-label="モード切替">
           <button class="nav-item is-active" data-mode="editor" type="button">
             <span class="material-symbols-outlined">edit_note</span>
-            <span class="sidebar-text">工事 / 手配書</span>
+            <span class="sidebar-text">工事 / 編集</span>
           </button>
           <button class="nav-item" data-mode="search" type="button">
             <span class="material-symbols-outlined">search</span>
@@ -38,7 +40,7 @@
         <section class="mode-panel is-active" data-mode-panel="editor">
           <section class="panel stack-lg">
             <div class="mode-header">
-              <h2>工事と手配書を編集</h2>
+              <h2>工事と手配書</h2>
               <div class="cluster">
                 <button id="refreshProjectsButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">refresh</span>
@@ -125,23 +127,13 @@
                   <span class="material-symbols-outlined">ink_eraser</span>
                   <span>空にする</span>
                 </button>
-              </div>
-
-              <button id="pdfDropZone" type="button" class="pdf-dropzone">
-                <span class="material-symbols-outlined">upload_file</span>
-                <span class="pdf-drop-copy">
-                  <strong>PDFをドロップ</strong>
-                  <small id="pdfDropHint">クリックで選択もできます</small>
-                </span>
-              </button>
-              <input id="pdfFileInput" type="file" accept="application/pdf" hidden>
-
-              <div class="cluster cluster-tight">
-                <button id="setGeminiKeyButton" type="button" class="compact-button">
-                  <span class="material-symbols-outlined">key</span>
-                  <span>Geminiキー</span>
+                <button id="pickPdfButton" type="button" class="tonal-button">
+                  <span class="material-symbols-outlined">upload_file</span>
+                  <span>PDF読取</span>
                 </button>
               </div>
+
+              <input id="pdfFileInput" type="file" accept="application/pdf" hidden>
             </section>
           </section>
         </section>
@@ -181,7 +173,7 @@
 
             <div class="search-summary">
               <strong id="searchResultCount">0件</strong>
-              <span class="subtle" id="searchResultHint">工事内を検索します</span>
+              <span class="subtle" id="searchResultHint">工事を選んで検索します。</span>
             </div>
 
             <div class="table-wrap">
@@ -301,5 +293,12 @@
     </div>
 
     <div class="toast-host" id="toastHost" aria-live="polite"></div>
+    <div class="app-drop-overlay" id="appDropOverlay" hidden aria-hidden="true">
+      <div class="app-drop-card">
+        <span class="material-symbols-outlined">upload_file</span>
+        <strong>PDFをドロップ</strong>
+        <span>手配書を読み取ります</span>
+      </div>
+    </div>
   </body>
 </html>

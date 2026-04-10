@@ -16,4 +16,4 @@ export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true
 });
 
-export { firebaseConfig };
+export { app, firebaseConfig };
