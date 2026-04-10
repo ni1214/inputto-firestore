@@ -163,7 +163,7 @@ h2 {
 }
 
 .status-row {
-  margin-top: 18px;
+  margin-top: 0;
   padding: 16px 22px;
   display: flex;
   align-items: center;
