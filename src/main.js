@@ -5,6 +5,7 @@ import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, s
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
 const MODE_STORAGE_KEY = 'inputto_active_mode';
+const AUTO_SAVE_DELAY_MS = 1200;
 
 const state = {
   env: 'production',
@@ -43,7 +44,6 @@ const elements = {
   projectSelect: document.getElementById('projectSelect'),
   refreshProjectsButton: document.getElementById('refreshProjectsButton'),
   newProjectButton: document.getElementById('newProjectButton'),
-  saveButton: document.getElementById('saveButton'),
   projectC2Input: document.getElementById('projectC2Input'),
   projectNameInput: document.getElementById('projectNameInput'),
   projectShortNameInput: document.getElementById('projectShortNameInput'),
@@ -74,6 +74,9 @@ const elements = {
   labelPages: document.getElementById('labelPages'),
   printButton: document.getElementById('printButton')
 };
+
+let autoSaveTimerId = null;
+let lastSavedSignature = '';
 
 function createUiRow(overrides = {}) {
   return {
@@ -231,6 +234,87 @@ function matchesFilter(row) {
 
 function hasRowContent(row) {
   return FIELD_DEFS.some((field) => String(row[field.key] || '').trim() !== '');
+}
+
+function getMeaningfulRows(rows = state.rows) {
+  return rows.filter(hasRowContent);
+}
+
+function hasIncompleteRows(rows = state.rows) {
+  return getMeaningfulRows(rows).some((row) => !String(row.symbol || '').trim());
+}
+
+function buildPersistedSnapshot() {
+  syncProjectFromForm();
+  syncDrawingFromForm();
+  return {
+    project: {
+      c2: state.project.c2 || '',
+      projectName: state.project.projectName || '',
+      shortName: state.project.shortName || '',
+      contact: state.project.contact || ''
+    },
+    drawing: {
+      id: state.selectedDrawingId || '',
+      drawingNumber: state.drawing.drawingNumber || '',
+      drawingStatus: state.drawing.drawingStatus || ''
+    },
+    rows: getMeaningfulRows().map((row) => {
+      const payload = { docId: row.docId || '' };
+      FIELD_DEFS.forEach((field) => {
+        payload[field.key] = row[field.key] || '';
+      });
+      return payload;
+    })
+  };
+}
+
+function computeSaveSignature() {
+  return JSON.stringify(buildPersistedSnapshot());
+}
+
+function syncSavedSignature() {
+  lastSavedSignature = computeSaveSignature();
+}
+
+function clearAutoSaveTimer() {
+  if (autoSaveTimerId) {
+    clearTimeout(autoSaveTimerId);
+    autoSaveTimerId = null;
+  }
+}
+
+function canAutoSave() {
+  const projectCode = String(state.project.c2 || '').trim();
+  const projectName = String(state.project.projectName || '').trim();
+  const drawingNumber = String(state.drawing.drawingNumber || '').trim();
+  const meaningfulRows = getMeaningfulRows();
+
+  if (!projectCode || !projectName) {
+    return false;
+  }
+  if (!drawingNumber && meaningfulRows.length) {
+    return false;
+  }
+  if (hasIncompleteRows(meaningfulRows)) {
+    return false;
+  }
+  return true;
+}
+
+function scheduleAutoSave() {
+  clearAutoSaveTimer();
+  if (!canAutoSave()) {
+    return;
+  }
+  const nextSignature = computeSaveSignature();
+  if (nextSignature === lastSavedSignature) {
+    return;
+  }
+  autoSaveTimerId = window.setTimeout(() => {
+    autoSaveTimerId = null;
+    void saveCurrent({ auto: true });
+  }, AUTO_SAVE_DELAY_MS);
 }
 
 function getReportRows() {
@@ -424,9 +508,11 @@ function resetDrawingState() {
 }
 
 function clearProjectState() {
+  clearAutoSaveTimer();
   state.project = { ...PROJECT_TEMPLATE };
   state.drawings = [];
   resetDrawingState();
+  syncSavedSignature();
   renderAll();
 }
 
@@ -452,6 +538,7 @@ async function selectProject(c2) {
     }
     resetDrawingState();
     renderAll();
+    syncSavedSignature();
     setStatus(`工事 ${c2} を読み込みました。`);
   } catch (error) {
     console.error(error);
@@ -487,6 +574,7 @@ async function loadCurrentDrawing() {
     state.rows = state.rows.length ? state.rows : [createUiRow()];
     state.selectedRowIds = new Set();
     renderAll();
+    syncSavedSignature();
     if (drawingId) {
       setStatus(`登録済みの手配書No ${state.drawing.drawingNumber} を読み込みました。`);
     } else {
@@ -498,9 +586,18 @@ async function loadCurrentDrawing() {
   }
 }
 
-async function saveCurrent() {
+async function saveCurrent(options = {}) {
+  const { auto = false } = options;
   syncProjectFromForm();
   syncDrawingFromForm();
+
+  if (!canAutoSave()) {
+    return;
+  }
+  const nextSignature = computeSaveSignature();
+  if (auto && nextSignature === lastSavedSignature) {
+    return;
+  }
 
   setBusy('saving', '保存しています。');
   try {
@@ -532,8 +629,9 @@ async function saveCurrent() {
     }
     state.selectedRowIds = new Set();
     renderAll();
+    syncSavedSignature();
     await refreshProjects();
-    setStatus('保存しました。');
+    setStatus(auto ? '自動保存しました。' : '保存しました。');
   } catch (error) {
     console.error(error);
     setStatus(`保存に失敗しました: ${error.message}`);
@@ -543,6 +641,7 @@ async function saveCurrent() {
 function addRow() {
   state.rows.push(createUiRow());
   renderRows();
+  scheduleAutoSave();
 }
 
 function duplicateSelectedRows() {
@@ -564,6 +663,7 @@ function duplicateSelectedRows() {
   state.selectedRowIds = new Set();
   renderRows();
   setStatus(`${targets.length}行を複製しました。`);
+  scheduleAutoSave();
 }
 
 function deleteSelectedRows() {
@@ -578,6 +678,7 @@ function deleteSelectedRows() {
   state.selectedRowIds = new Set();
   renderRows();
   setStatus('選択行を削除しました。');
+  scheduleAutoSave();
 }
 
 async function performSearch() {
@@ -671,7 +772,6 @@ function bindEvents() {
     setStatus('新規工事入力に切り替えました。');
   });
   elements.loadDrawingButton.addEventListener('click', loadCurrentDrawing);
-  elements.saveButton.addEventListener('click', saveCurrent);
   elements.addRowButton.addEventListener('click', addRow);
   elements.duplicateRowButton.addEventListener('click', duplicateSelectedRows);
   elements.deleteRowsButton.addEventListener('click', deleteSelectedRows);
@@ -722,6 +822,7 @@ function bindEvents() {
     }
     row[input.dataset.fieldKey] = input.value;
     renderReport();
+    scheduleAutoSave();
   });
 
   elements.tableBody.addEventListener('change', (event) => {
@@ -767,6 +868,7 @@ function bindEvents() {
       syncProjectFromForm();
       syncDrawingFromForm();
       renderReport();
+      scheduleAutoSave();
     });
   });
 }
@@ -774,6 +876,7 @@ function bindEvents() {
 function renderInitialState() {
   renderTableHead();
   state.rows = [createUiRow()];
+  syncSavedSignature();
   renderSearchResults();
   renderAll();
 }
