@@ -1,6 +1,12 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
 import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
+import {
+  clearStoredGeminiApiKey,
+  extractHandaiDataFromPdf,
+  loadStoredGeminiApiKey,
+  saveGeminiApiKey
+} from './gemini.js';
 
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
@@ -13,6 +19,7 @@ const state = {
   sidebarCollapsed: localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true',
   loading: false,
   saving: false,
+  geminiApiKey: loadStoredGeminiApiKey(),
   projects: [],
   project: { ...PROJECT_TEMPLATE },
   drawings: [],
@@ -50,6 +57,13 @@ const elements = {
   drawingStatusInput: document.getElementById('drawingStatusInput'),
   loadDrawingButton: document.getElementById('loadDrawingButton'),
   drawingTabs: document.getElementById('drawingTabs'),
+  bulkSymbolsInput: document.getElementById('bulkSymbolsInput'),
+  applyBulkSymbolsButton: document.getElementById('applyBulkSymbolsButton'),
+  clearBulkSymbolsButton: document.getElementById('clearBulkSymbolsButton'),
+  pdfDropZone: document.getElementById('pdfDropZone'),
+  pdfDropHint: document.getElementById('pdfDropHint'),
+  pdfFileInput: document.getElementById('pdfFileInput'),
+  setGeminiKeyButton: document.getElementById('setGeminiKeyButton'),
   filterInput: document.getElementById('filterInput'),
   addRowButton: document.getElementById('addRowButton'),
   duplicateRowButton: document.getElementById('duplicateRowButton'),
@@ -70,7 +84,8 @@ const elements = {
   summaryLabels: document.getElementById('summaryLabels'),
   inspectionTableBody: document.getElementById('inspectionTableBody'),
   labelPages: document.getElementById('labelPages'),
-  printButton: document.getElementById('printButton')
+  printButton: document.getElementById('printButton'),
+  toastHost: document.getElementById('toastHost')
 };
 
 let autoSaveTimerId = null;
@@ -115,6 +130,19 @@ function setBusy(mode, message) {
 
 function setStatus(message) {
   setBusy('', message);
+}
+
+function showToast(message, kind = 'info') {
+  if (!elements.toastHost || !message) {
+    return;
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast${kind === 'error' ? ' is-error' : kind === 'success' ? ' is-success' : ''}`;
+  toast.textContent = message;
+  elements.toastHost.appendChild(toast);
+  window.setTimeout(() => {
+    toast.remove();
+  }, 3200);
 }
 
 function setActiveMode(mode) {
@@ -246,6 +274,62 @@ function hasIncompleteRows(rows = state.rows) {
   return getMeaningfulRows(rows).some((row) => !String(row.symbol || '').trim());
 }
 
+function normalizeSymbolInput(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, '');
+}
+
+function expandSymbolRange(value) {
+  const normalized = normalizeSymbolInput(value);
+  const rangeMatch = normalized.match(/^(.*?)(\d+)\s*[~〜～]\s*(.*?)(\d+)$/);
+  if (!rangeMatch) {
+    return [normalized].filter(Boolean);
+  }
+
+  const [, prefixLeft, startText, prefixRight, endText] = rangeMatch;
+  if (normalizeText(prefixLeft) !== normalizeText(prefixRight)) {
+    return [normalized].filter(Boolean);
+  }
+
+  const startNumber = Number(startText);
+  const endNumber = Number(endText);
+  if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber) || endNumber < startNumber) {
+    return [normalized].filter(Boolean);
+  }
+
+  const padWidth = startText.startsWith('0') ? startText.length : 0;
+  const items = [];
+  for (let number = startNumber; number <= endNumber; number += 1) {
+    const suffix = padWidth ? String(number).padStart(padWidth, '0') : String(number);
+    items.push(`${prefixLeft}${suffix}`);
+  }
+  return items.filter(Boolean);
+}
+
+function parseBulkSymbols(text) {
+  const seen = new Set();
+  const symbols = [];
+
+  String(text || '')
+    .split(/[\n,、]+/)
+    .map((line) => normalizeSymbolInput(line))
+    .filter(Boolean)
+    .forEach((line) => {
+      expandSymbolRange(line).forEach((symbol) => {
+        const normalized = normalizeText(symbol);
+        if (!normalized || seen.has(normalized)) {
+          return;
+        }
+        seen.add(normalized);
+        symbols.push(symbol);
+      });
+    });
+
+  return symbols;
+}
+
 function buildPersistedSnapshot() {
   syncProjectFromForm();
   syncDrawingFromForm();
@@ -317,6 +401,121 @@ function scheduleAutoSave() {
     autoSaveTimerId = null;
     void saveCurrent({ auto: true });
   }, AUTO_SAVE_DELAY_MS);
+}
+
+function applyBulkSymbols() {
+  const symbols = parseBulkSymbols(elements.bulkSymbolsInput?.value || '');
+  if (!symbols.length) {
+    setStatus('追加する符号がありません。');
+    return;
+  }
+
+  const existingRows = getMeaningfulRows();
+  const nextRows = existingRows.length ? state.rows.filter(hasRowContent) : [];
+  const seen = new Set(nextRows.map((row) => normalizeText(row.symbol)));
+
+  symbols.forEach((symbol) => {
+    const normalized = normalizeText(symbol);
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    nextRows.push(createUiRow({ symbol }));
+  });
+
+  state.rows = nextRows.length ? nextRows : [createUiRow()];
+  state.selectedRowIds = new Set();
+  renderRows();
+  if (elements.bulkSymbolsInput) {
+    elements.bulkSymbolsInput.value = '';
+  }
+  setStatus(`${symbols.length}件の符号を追加しました。`);
+  showToast(`${symbols.length}件の符号を追加しました。`, 'success');
+  scheduleAutoSave();
+}
+
+function clearBulkSymbols() {
+  if (elements.bulkSymbolsInput) {
+    elements.bulkSymbolsInput.value = '';
+    elements.bulkSymbolsInput.focus();
+  }
+  showToast('一括入力を空にしました。');
+}
+
+function promptForGeminiKey() {
+  const nextKey = window.prompt('Gemini APIキーを入力してください', state.geminiApiKey || '');
+  if (nextKey === null) {
+    return;
+  }
+  if (!String(nextKey).trim()) {
+    clearStoredGeminiApiKey();
+    state.geminiApiKey = '';
+    showToast('Gemini APIキーを削除しました。');
+    return;
+  }
+  const savedKey = saveGeminiApiKey(nextKey);
+  state.geminiApiKey = savedKey;
+  showToast('Gemini APIキーを保存しました。', 'success');
+}
+
+async function handlePdfImport(file) {
+  if (!file) {
+    return;
+  }
+
+  if (!state.geminiApiKey) {
+    const nextKey = window.prompt('Gemini APIキーを入力してください');
+    if (!nextKey) {
+      showToast('Gemini APIキーがないためPDFを読み込めません。', 'error');
+      return;
+    }
+    state.geminiApiKey = saveGeminiApiKey(nextKey);
+  }
+
+  setBusy('loading', 'PDFを解析しています...');
+  elements.pdfDropZone?.classList.add('is-busy');
+  try {
+    const extracted = await extractHandaiDataFromPdf(file, {
+      apiKey: state.geminiApiKey
+    });
+
+    const bundle = extracted.project.c2
+      ? await loadProjectBundle(state.env, extracted.project.c2)
+      : { project: { ...PROJECT_TEMPLATE }, drawings: [] };
+
+    state.project = {
+      c2: extracted.project.c2 || bundle.project.c2 || '',
+      projectName: extracted.project.projectName || bundle.project.projectName || '',
+      shortName: extracted.project.shortName || bundle.project.shortName || '',
+      contact: extracted.project.contact || bundle.project.contact || ''
+    };
+    state.drawings = bundle.drawings || [];
+    state.drawing = {
+      ...DRAWING_TEMPLATE,
+      drawingNumber: extracted.drawing.drawingNumber || '',
+      drawingStatus: extracted.drawing.drawingStatus || ''
+    };
+    state.selectedDrawingId =
+      state.drawings.find((item) => item.drawingNumber === state.drawing.drawingNumber)?.id || '';
+    state.rows = extracted.rows.length
+      ? extracted.rows.map((row) => createUiRow({ ...row }))
+      : [createUiRow()];
+    state.selectedRowIds = new Set();
+    if (!state.search.projectC2) {
+      state.search.projectC2 = state.project.c2;
+    }
+    renderAll();
+    setActiveMode('report');
+    syncSavedSignature();
+    scheduleAutoSave();
+    showToast('PDFの内容を読み込みました。', 'success');
+  } catch (error) {
+    console.error(error);
+    showToast(`PDFの読み込みに失敗しました: ${error.message}`, 'error');
+  } finally {
+    elements.pdfDropZone?.classList.remove('is-busy');
+    setBusy('', '');
+  }
 }
 
 function getReportRows() {
@@ -752,7 +951,7 @@ async function openSearchResult(index) {
   };
   updateFormInputs();
   await loadCurrentDrawing();
-  setActiveMode('editor');
+  setActiveMode('report');
 }
 
 function bindEvents() {
@@ -774,6 +973,8 @@ function bindEvents() {
     setStatus('新規工事入力に切り替えました。');
   });
   elements.loadDrawingButton.addEventListener('click', loadCurrentDrawing);
+  elements.applyBulkSymbolsButton.addEventListener('click', applyBulkSymbols);
+  elements.clearBulkSymbolsButton.addEventListener('click', clearBulkSymbols);
   elements.addRowButton.addEventListener('click', addRow);
   elements.duplicateRowButton.addEventListener('click', duplicateSelectedRows);
   elements.deleteRowsButton.addEventListener('click', deleteSelectedRows);
@@ -858,6 +1059,39 @@ function bindEvents() {
     await openSearchResult(button.dataset.openSearchResult);
   });
 
+  elements.setGeminiKeyButton.addEventListener('click', promptForGeminiKey);
+
+  elements.pdfDropZone.addEventListener('click', () => {
+    elements.pdfFileInput.click();
+  });
+  elements.pdfDropZone.addEventListener('dragenter', (event) => {
+    event.preventDefault();
+    elements.pdfDropZone.classList.add('is-dragover');
+  });
+  elements.pdfDropZone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    elements.pdfDropZone.classList.add('is-dragover');
+  });
+  elements.pdfDropZone.addEventListener('dragleave', () => {
+    elements.pdfDropZone.classList.remove('is-dragover');
+  });
+  elements.pdfDropZone.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    elements.pdfDropZone.classList.remove('is-dragover');
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      await handlePdfImport(file);
+    }
+  });
+
+  elements.pdfFileInput.addEventListener('change', async () => {
+    const file = elements.pdfFileInput.files?.[0];
+    if (file) {
+      await handlePdfImport(file);
+    }
+    elements.pdfFileInput.value = '';
+  });
+
   [
     elements.projectC2Input,
     elements.projectNameInput,
@@ -872,6 +1106,13 @@ function bindEvents() {
       renderReport();
       scheduleAutoSave();
     });
+  });
+
+  elements.bulkSymbolsInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      applyBulkSymbols();
+    }
   });
 }
 
