@@ -142,6 +142,203 @@ function hasAnyRowContent(row) {
   return Object.entries(row).some(([key, value]) => key !== 'docId' && String(value || '').trim() !== '');
 }
 
+const ROW_FIELDS = Object.keys(sanitizeRow({}));
+const SYMBOL_PREVIEW_LIMIT = 6;
+const MAX_BATCH_WRITES = 450;
+
+function sortSymbolsByLabel(left, right) {
+  return String(left.symbol || '').localeCompare(String(right.symbol || ''), 'ja', { numeric: true });
+}
+
+function chunkList(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function commitChunked(operations) {
+  for (const chunk of chunkList(operations, MAX_BATCH_WRITES)) {
+    const batch = writeBatch(db);
+    chunk.forEach((applyOperation) => applyOperation(batch));
+    await batch.commit();
+  }
+}
+
+function indexSymbolEntries(entries) {
+  const byId = new Map();
+  const bySymbol = new Map();
+
+  entries.forEach((entry) => {
+    byId.set(entry.id, entry);
+    const key = normalizeText(entry.symbol);
+    if (!key) {
+      return;
+    }
+    const list = bySymbol.get(key) || [];
+    list.push(entry);
+    bySymbol.set(key, list);
+  });
+
+  bySymbol.forEach((list) => {
+    list.sort((left, right) => {
+      const drawingDiff = Number(Boolean(right.drawingId)) - Number(Boolean(left.drawingId));
+      if (drawingDiff !== 0) {
+        return drawingDiff;
+      }
+      const rowDiff = String(left.drawingId || '').localeCompare(String(right.drawingId || ''), 'ja', {
+        numeric: true
+      });
+      if (rowDiff !== 0) {
+        return rowDiff;
+      }
+      return sortSymbolsByLabel(left, right);
+    });
+  });
+
+  return { byId, bySymbol };
+}
+
+function mergeRowData(existingEntry, incomingRow, preserveExistingBlank) {
+  const sanitized = sanitizeRow(incomingRow);
+
+  if (!existingEntry || !preserveExistingBlank) {
+    return sanitized;
+  }
+
+  const merged = { ...existingEntry };
+  delete merged.id;
+
+  ROW_FIELDS.forEach((key) => {
+    if (sanitized[key] !== '') {
+      merged[key] = sanitized[key];
+      return;
+    }
+    if (merged[key] === undefined || merged[key] === null) {
+      merged[key] = '';
+    }
+  });
+
+  return merged;
+}
+
+function pickExistingEntry({ row, drawingId, byId, bySymbol }) {
+  const rowEntry = row.docId ? byId.get(row.docId) : null;
+  const symbolKey = normalizeText(row.symbol);
+  const symbolEntries = symbolKey ? bySymbol.get(symbolKey) || [] : [];
+
+  if (symbolEntries.length) {
+    return (
+      symbolEntries.find((entry) => entry.id === row.docId) ||
+      symbolEntries.find((entry) => String(entry.drawingId || '') === drawingId) ||
+      symbolEntries[0]
+    );
+  }
+
+  return rowEntry || null;
+}
+
+function buildSymbolPayload({
+  existingEntry,
+  incomingRow,
+  cleanProject,
+  cleanDrawing,
+  drawingId,
+  operator,
+  preserveExistingBlank
+}) {
+  const updatedBy = sanitizeText(operator);
+  const merged = mergeRowData(existingEntry, incomingRow, preserveExistingBlank);
+  const payload = {
+    ...merged,
+    c2: cleanProject.c2,
+    projectName: cleanProject.projectName,
+    shortName: cleanProject.shortName,
+    contact: cleanProject.contact,
+    drawingId,
+    drawingNumber: cleanDrawing.drawingNumber,
+    drawingStatus: cleanDrawing.drawingStatus,
+    symbolN: normalizeText(merged.symbol),
+    floorN: normalizeText(merged.floor),
+    insideOutsideN: normalizeText(merged.insideOutside),
+    nameN: normalizeText(merged.name),
+    updatedAt: serverTimestamp(),
+    updatedBy
+  };
+
+  if (!existingEntry) {
+    payload.createdAt = serverTimestamp();
+    payload.createdBy = updatedBy;
+  }
+
+  return payload;
+}
+
+async function recalculateProjectSummaries(env, c2, operator) {
+  const [drawingSnapshot, symbolSnapshot] = await Promise.all([getDocs(drawingsRef(env, c2)), getDocs(symbolsRef(env, c2))]);
+  const drawings = drawingSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const symbols = symbolSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const assignedSymbols = symbols.filter((row) => sanitizeText(row.drawingId));
+  const assignedByDrawingId = new Map();
+
+  assignedSymbols.forEach((row) => {
+    const key = sanitizeText(row.drawingId);
+    const list = assignedByDrawingId.get(key) || [];
+    list.push(row);
+    assignedByDrawingId.set(key, list);
+  });
+
+  const projectSymbolCount = drawings.reduce((total, drawing) => {
+    const grouped = assignedByDrawingId.get(drawing.id) || [];
+    return total + grouped.length;
+  }, 0);
+
+  const operations = drawings.map((drawing) => (batch) => {
+    const grouped = assignedByDrawingId.get(drawing.id) || [];
+    const sorted = [...grouped].sort(sortSymbolsByLabel);
+    batch.set(
+      drawingRef(env, c2, drawing.id),
+      {
+        rowCount: sorted.length,
+        symbolPreview: sorted.slice(0, SYMBOL_PREVIEW_LIMIT).map((row) => row.symbol),
+        updatedAt: serverTimestamp(),
+        updatedBy: sanitizeText(operator)
+      },
+      { merge: true }
+    );
+  });
+
+  operations.push((batch) => {
+    batch.set(
+      projectRef(env, c2),
+      {
+        drawingCount: drawings.length,
+        symbolCount: projectSymbolCount,
+        updatedAt: serverTimestamp(),
+        updatedBy: sanitizeText(operator)
+      },
+      { merge: true }
+    );
+  });
+
+  await commitChunked(operations);
+
+  const refreshedDrawingsSnapshot = await getDocs(drawingsRef(env, c2));
+  const refreshedDrawings = refreshedDrawingsSnapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((left, right) => String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', { numeric: true }));
+
+  return {
+    drawings: refreshedDrawings,
+    project: {
+      c2: sanitizeText(c2),
+      drawingCount: drawings.length,
+      symbolCount: projectSymbolCount
+    }
+  };
+}
+
 function toComparableDate(value) {
   return value?.seconds ? value.seconds * 1000 : 0;
 }
@@ -183,7 +380,7 @@ export async function loadDrawingRows(env, c2, drawingId) {
       docId: item.id,
       ...item.data()
     }))
-    .sort((left, right) => String(left.symbol || '').localeCompare(String(right.symbol || ''), 'ja', { numeric: true }));
+    .sort(sortSymbolsByLabel);
 }
 
 export async function loadProjectSymbols(env, c2) {
@@ -194,8 +391,11 @@ export async function loadProjectSymbols(env, c2) {
       docId: item.id,
       ...item.data()
     }))
+    .filter((item) => sanitizeText(item.drawingId))
     .sort((left, right) => {
-      const drawingDiff = String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', { numeric: true });
+      const drawingDiff = String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', {
+        numeric: true
+      });
       if (drawingDiff !== 0) {
         return drawingDiff;
       }
@@ -225,7 +425,7 @@ export async function saveProjectHeader(env, project, operator) {
   return cleanProject;
 }
 
-export async function saveDrawingBundle({ env, project, drawing, rows, operator }) {
+async function saveDrawingBundleCore({ env, project, drawing, rows, operator, preserveExistingBlank }) {
   const cleanProject = await saveProjectHeader(env, project, operator);
   const cleanDrawing = sanitizeDrawing(drawing);
 
@@ -242,7 +442,7 @@ export async function saveDrawingBundle({ env, project, drawing, rows, operator 
   }
 
   const drawingId = sanitizeText(drawing.id) || makeDrawingId(cleanDrawing.drawingNumber);
-  const nextRows = rows.map(sanitizeRow).filter((row) => hasAnyRowContent(row));
+  const nextRows = (Array.isArray(rows) ? rows : []).map(sanitizeRow).filter((row) => hasAnyRowContent(row));
   const comparableSymbols = new Set();
 
   nextRows.forEach((row) => {
@@ -256,92 +456,97 @@ export async function saveDrawingBundle({ env, project, drawing, rows, operator 
     comparableSymbols.add(normalized);
   });
 
-  const existingSnapshot = await getDocs(query(symbolsRef(env, cleanProject.c2), where('drawingId', '==', drawingId)));
-  const existingIds = new Set(existingSnapshot.docs.map((item) => item.id));
+  const existingSnapshot = await getDocs(symbolsRef(env, cleanProject.c2));
+  const existingEntries = existingSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const { byId, bySymbol } = indexSymbolEntries(existingEntries);
   const nextIds = new Set();
+  const writes = [];
 
-  const batch = writeBatch(db);
-  batch.set(
-    drawingRef(env, cleanProject.c2, drawingId),
-    {
-      drawingId,
-      drawingNumber: cleanDrawing.drawingNumber,
-      drawingStatus: cleanDrawing.drawingStatus,
-      contact: cleanProject.contact,
-      rowCount: nextRows.length,
-      symbolPreview: nextRows.slice(0, 6).map((row) => row.symbol),
-      updatedAt: serverTimestamp(),
-      updatedBy: sanitizeText(operator)
-    },
-    { merge: true }
-  );
-
-  nextRows.forEach((row) => {
-    const docId = row.docId || makeSymbolId(row.symbol);
-    nextIds.add(docId);
+  writes.push((batch) => {
     batch.set(
-      symbolRef(env, cleanProject.c2, docId),
+      drawingRef(env, cleanProject.c2, drawingId),
       {
-        ...row,
-        c2: cleanProject.c2,
-        projectName: cleanProject.projectName,
-        shortName: cleanProject.shortName,
-        contact: cleanProject.contact,
         drawingId,
         drawingNumber: cleanDrawing.drawingNumber,
         drawingStatus: cleanDrawing.drawingStatus,
-        symbolN: normalizeText(row.symbol),
-        floorN: normalizeText(row.floor),
-        insideOutsideN: normalizeText(row.insideOutside),
-        nameN: normalizeText(row.name),
+        contact: cleanProject.contact,
+        rowCount: nextRows.length,
+        symbolPreview: nextRows.slice(0, SYMBOL_PREVIEW_LIMIT).map((row) => row.symbol),
         updatedAt: serverTimestamp(),
-        updatedBy: sanitizeText(operator),
-        createdAt: row.docId ? undefined : serverTimestamp(),
-        createdBy: row.docId ? undefined : sanitizeText(operator)
+        updatedBy: sanitizeText(operator)
       },
       { merge: true }
     );
   });
 
-  existingIds.forEach((docId) => {
-    if (!nextIds.has(docId)) {
-      batch.delete(symbolRef(env, cleanProject.c2, docId));
+  nextRows.forEach((row) => {
+    const existingEntry = pickExistingEntry({ row, drawingId, byId, bySymbol });
+    const docId = existingEntry?.id || row.docId || makeSymbolId(row.symbol);
+    const isMove = Boolean(existingEntry) && String(existingEntry.drawingId || '') !== drawingId;
+    const payload = buildSymbolPayload({
+      existingEntry,
+      incomingRow: row,
+      cleanProject,
+      cleanDrawing,
+      drawingId,
+      operator,
+      preserveExistingBlank: Boolean(preserveExistingBlank || isMove)
+    });
+
+    nextIds.add(docId);
+    writes.push((batch) => {
+      batch.set(symbolRef(env, cleanProject.c2, docId), payload, { merge: true });
+    });
+  });
+
+  existingEntries.forEach((entry) => {
+    if (!nextIds.has(entry.id) && String(entry.drawingId || '') === drawingId) {
+      writes.push((batch) => {
+        batch.set(
+          symbolRef(env, cleanProject.c2, entry.id),
+          {
+            drawingId: '',
+            drawingNumber: '',
+            drawingStatus: '',
+            updatedAt: serverTimestamp(),
+            updatedBy: sanitizeText(operator)
+          },
+          { merge: true }
+        );
+      });
     }
   });
 
-  await batch.commit();
+  await commitChunked(writes);
 
-  const drawingsSnapshot = await getDocs(drawingsRef(env, cleanProject.c2));
-  const drawings = drawingsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-  const drawingCount = drawings.length;
-  const symbolCount = drawings.reduce((total, item) => total + Number(item.rowCount || 0), 0);
-
-  await setDoc(
-    projectRef(env, cleanProject.c2),
-    {
-      ...cleanProject,
-      drawingCount,
-      symbolCount,
-      updatedAt: serverTimestamp(),
-      updatedBy: sanitizeText(operator)
-    },
-    { merge: true }
-  );
-
+  const summary = await recalculateProjectSummaries(env, cleanProject.c2, operator);
   const rowsSnapshot = await getDocs(query(symbolsRef(env, cleanProject.c2), where('drawingId', '==', drawingId)));
 
   return {
-    project: cleanProject,
+    project: {
+      ...cleanProject,
+      drawingCount: summary.project.drawingCount,
+      symbolCount: summary.project.symbolCount
+    },
     drawing: { id: drawingId, ...cleanDrawing },
-    drawings,
+    drawings: summary.drawings,
     rows: rowsSnapshot.docs
       .map((item) => ({
         uiId: crypto.randomUUID(),
         docId: item.id,
         ...item.data()
       }))
-      .sort((left, right) => String(left.symbol || '').localeCompare(String(right.symbol || ''), 'ja', { numeric: true }))
+      .sort(sortSymbolsByLabel)
   };
+}
+
+export async function saveDrawingBundle({ env, project, drawing, rows, operator }) {
+  return saveDrawingBundleCore({ env, project, drawing, rows, operator, preserveExistingBlank: false });
+}
+
+export async function saveDrawingSymbolBatch({ env, project, drawing, symbols, operator }) {
+  const rows = (Array.isArray(symbols) ? symbols : []).map((item) => (typeof item === 'string' ? { symbol: item } : item));
+  return saveDrawingBundleCore({ env, project, drawing, rows, operator, preserveExistingBlank: true });
 }
 
 export const firestoreModel = {

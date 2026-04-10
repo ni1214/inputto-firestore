@@ -56,7 +56,7 @@
               </div>
 
               <label class="field">
-                <span>工事を選ぶ</span>
+                <span>候補</span>
                 <select id="projectSelect">
                   <option value="">工事を選択</option>
                 </select>
@@ -73,12 +73,73 @@
                 </label>
                 <label class="field field-span-2">
                   <span>工事名</span>
-                  <input id="projectNameInput" type="text" placeholder="正式名称">
+                  <input id="projectNameInput" type="text" placeholder="工事名">
                 </label>
                 <label class="field field-span-2">
                   <span>略称</span>
                   <input id="projectShortNameInput" type="text" placeholder="ラベル用の短い名前">
                 </label>
+              </div>
+            </section>
+
+            <section class="subpanel stack-lg">
+              <div class="section-head">
+                <h3>手配書</h3>
+                <div class="cluster">
+                  <button id="loadDrawingButton" type="button" class="tonal-button">
+                    <span class="material-symbols-outlined">folder_open</span>
+                    <span>読込</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <label class="field">
+                  <span>手配書No</span>
+                  <input id="drawingNumberInput" type="text" placeholder="例: 1-2">
+                </label>
+                <label class="field">
+                  <span>手配書状態</span>
+                  <input id="drawingStatusInput" type="text" placeholder="例: 外部">
+                </label>
+              </div>
+
+              <div class="drawing-tabs" id="drawingTabs"></div>
+
+              <label class="field field-span-2">
+                <span>符号をまとめて入れる</span>
+                <textarea
+                  id="bulkSymbolsInput"
+                  class="bulk-symbol-input"
+                  rows="6"
+                  placeholder="SD-1&#10;SD-2&#10;SD-3&#10;SD-1~SD-10"></textarea>
+              </label>
+
+              <div class="cluster">
+                <button id="applyBulkSymbolsButton" type="button" class="primary-button">
+                  <span class="material-symbols-outlined">playlist_add</span>
+                  <span>符号を反映</span>
+                </button>
+                <button id="clearBulkSymbolsButton" type="button" class="ghost-button">
+                  <span class="material-symbols-outlined">ink_eraser</span>
+                  <span>空にする</span>
+                </button>
+              </div>
+
+              <button id="pdfDropZone" type="button" class="pdf-dropzone">
+                <span class="material-symbols-outlined">upload_file</span>
+                <span class="pdf-drop-copy">
+                  <strong>PDFをドロップ</strong>
+                  <small id="pdfDropHint">クリックで選択もできます</small>
+                </span>
+              </button>
+              <input id="pdfFileInput" type="file" accept="application/pdf" hidden>
+
+              <div class="cluster cluster-tight">
+                <button id="setGeminiKeyButton" type="button" class="compact-button">
+                  <span class="material-symbols-outlined">key</span>
+                  <span>Geminiキー</span>
+                </button>
               </div>
             </section>
           </section>
@@ -113,13 +174,13 @@
               </label>
               <label class="field">
                 <span>内外</span>
-                <input id="searchInsideOutsideInput" type="text" placeholder="例: 内部">
+                <input id="searchInsideOutsideInput" type="text" placeholder="例: 外部">
               </label>
             </div>
 
             <div class="search-summary">
               <strong id="searchResultCount">0件</strong>
-              <span class="subtle" id="searchResultHint">工事内を検索します。</span>
+              <span class="subtle" id="searchResultHint">工事内を検索します</span>
             </div>
 
             <div class="table-wrap">
@@ -167,71 +228,10 @@
                 <strong id="summaryRows">0件</strong>
               </div>
               <div class="summary-card">
-                <span class="summary-label">ラベル数</span>
+                <span class="summary-label">ラベル枚数</span>
                 <strong id="summaryLabels">0枚</strong>
               </div>
             </div>
-
-            <section class="subpanel stack-lg report-edit-block">
-              <div class="section-head">
-                <h3>手配書</h3>
-                <div class="cluster">
-                  <button id="loadDrawingButton" type="button" class="tonal-button">
-                    <span class="material-symbols-outlined">folder_open</span>
-                    <span>読込</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid-2">
-                <label class="field">
-                  <span>手配書No</span>
-                  <input id="drawingNumberInput" type="text" placeholder="例: 1-2">
-                </label>
-                <label class="field">
-                  <span>手配書状態</span>
-                  <input id="drawingStatusInput" type="text" placeholder="例: 外部">
-                </label>
-              </div>
-
-              <div class="drawing-tabs" id="drawingTabs"></div>
-
-              <label class="field field-span-2">
-                <span>符号をまとめて入れる</span>
-                <textarea
-                  id="bulkSymbolsInput"
-                  class="bulk-symbol-input"
-                  rows="6"
-                  placeholder="SD-1&#10;SD-2&#10;SD-3&#10;SD-1〜SD-10"></textarea>
-              </label>
-
-              <div class="cluster">
-                <button id="applyBulkSymbolsButton" type="button" class="primary-button">
-                  <span class="material-symbols-outlined">playlist_add</span>
-                  <span>符号を反映</span>
-                </button>
-                <button id="clearBulkSymbolsButton" type="button" class="ghost-button">
-                  <span class="material-symbols-outlined">ink_eraser</span>
-                  <span>空にする</span>
-                </button>
-              </div>
-
-              <button id="pdfDropZone" type="button" class="pdf-dropzone">
-                <span class="material-symbols-outlined">upload_file</span>
-                <span class="pdf-drop-copy">
-                  <strong>PDFをドロップ</strong>
-                  <small id="pdfDropHint">クリックでも選択できます</small>
-                </span>
-              </button>
-              <input id="pdfFileInput" type="file" accept="application/pdf" hidden>
-
-              <div class="cluster cluster-tight">
-                <button id="setGeminiKeyButton" type="button" class="compact-button">
-                  <span class="material-symbols-outlined">key</span>
-                  <span>Geminiキー</span>
-                </button>
-              </div>
-            </section>
 
             <section class="subpanel stack-lg">
               <div class="section-head">
@@ -278,7 +278,7 @@
                       <th>品名</th>
                       <th>フロア</th>
                       <th>内外</th>
-                      <th>ラベル数</th>
+                      <th>ラベル枚数</th>
                       <th>焼付色</th>
                       <th>担当</th>
                     </tr>

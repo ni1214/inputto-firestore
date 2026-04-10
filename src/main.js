@@ -1,6 +1,6 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
-import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
+import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle, saveDrawingSymbolBatch } from './store.js';
 import {
   clearStoredGeminiApiKey,
   extractHandaiDataFromPdf,
@@ -330,6 +330,16 @@ function parseBulkSymbols(text) {
   return symbols;
 }
 
+function syncBulkSymbolsInput(rows = state.rows) {
+  if (!elements.bulkSymbolsInput) {
+    return;
+  }
+  elements.bulkSymbolsInput.value = getMeaningfulRows(rows)
+    .map((row) => String(row.symbol || '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
 function buildPersistedSnapshot() {
   syncProjectFromForm();
   syncDrawingFromForm();
@@ -403,10 +413,58 @@ function scheduleAutoSave() {
   }, AUTO_SAVE_DELAY_MS);
 }
 
-function applyBulkSymbols() {
+async function applyBulkSymbols() {
   const symbols = parseBulkSymbols(elements.bulkSymbolsInput?.value || '');
-  if (!symbols.length) {
+  syncProjectFromForm();
+  syncDrawingFromForm();
+  if (!symbols.length && !state.selectedDrawingId) {
     setStatus('追加する符号がありません。');
+    return;
+  }
+
+  if (!state.project.c2 || !state.project.projectName) {
+    showToast('先に工事を入れてください。', 'error');
+    return;
+  }
+  if (!state.drawing.drawingNumber) {
+    showToast('先に手配書Noを入れてください。', 'error');
+    return;
+  }
+
+  try {
+    const response = await saveDrawingSymbolBatch({
+      env: state.env,
+      project: state.project,
+      drawing: { ...state.drawing, id: state.selectedDrawingId },
+      symbols,
+      operator: SAVE_ACTOR
+    });
+
+    state.project = {
+      ...state.project,
+      ...response.project
+    };
+    if (response.drawings) {
+      state.drawings = response.drawings.sort((left, right) => String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', { numeric: true }));
+    }
+    if (response.drawing) {
+      state.selectedDrawingId = response.drawing.id;
+      state.drawing = {
+        ...state.drawing,
+        ...response.drawing
+      };
+    }
+    state.rows = Array.isArray(response.rows) && response.rows.length ? response.rows : [createUiRow()];
+    state.selectedRowIds = new Set();
+    syncBulkSymbolsInput(state.rows);
+    renderAll();
+    syncSavedSignature();
+    await refreshProjects();
+    showToast('符号を反映しました。', 'success');
+    return;
+  } catch (error) {
+    console.error(error);
+    showToast(`符号の反映に失敗しました: ${error.message}`, 'error');
     return;
   }
 
@@ -501,6 +559,7 @@ async function handlePdfImport(file) {
       ? extracted.rows.map((row) => createUiRow({ ...row }))
       : [createUiRow()];
     state.selectedRowIds = new Set();
+    syncBulkSymbolsInput(state.rows);
     if (!state.search.projectC2) {
       state.search.projectC2 = state.project.c2;
     }
@@ -706,6 +765,7 @@ function resetDrawingState() {
   state.drawing = { ...DRAWING_TEMPLATE };
   state.rows = [];
   state.selectedRowIds = new Set();
+  syncBulkSymbolsInput([]);
 }
 
 function clearProjectState() {
@@ -774,6 +834,7 @@ async function loadCurrentDrawing() {
     state.rows = drawingId ? await loadDrawingRows(state.env, state.project.c2, drawingId) : [];
     state.rows = state.rows.length ? state.rows : [createUiRow()];
     state.selectedRowIds = new Set();
+    syncBulkSymbolsInput(state.rows);
     renderAll();
     syncSavedSignature();
     if (drawingId) {
@@ -829,6 +890,7 @@ async function saveCurrent(options = {}) {
       state.rows = [createUiRow()];
     }
     state.selectedRowIds = new Set();
+    syncBulkSymbolsInput(state.rows);
     renderAll();
     syncSavedSignature();
     await refreshProjects();
