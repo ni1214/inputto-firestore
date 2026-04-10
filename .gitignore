@@ -12,3 +12,6 @@ tmp_*
 .tmp*
 _check_*
 _scripts_check.js
+!index.html
+!Index.html
+!docs/index.html
