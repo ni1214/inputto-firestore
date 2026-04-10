@@ -50,8 +50,7 @@ button {
   grid-template-columns: 92px minmax(0, 1fr);
 }
 
-.panel,
-.status-row {
+.panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 28px;
@@ -143,33 +142,6 @@ button {
   display: grid;
   gap: 18px;
   min-width: 0;
-}
-
-.status-row {
-  padding: 16px 22px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.status-pill {
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: #edf2ff;
-  color: var(--primary);
-  font-weight: 700;
-  min-width: 6.5rem;
-  text-align: center;
-}
-
-.status-pill[data-mode="loading"] {
-  background: #fff6dc;
-  color: #8b5e00;
-}
-
-.status-pill[data-mode="saving"] {
-  background: #e7f9ef;
-  color: #0a7b45;
 }
 
 .mode-panel {
@@ -559,7 +531,6 @@ h3 {
   }
 
   .sidebar,
-  .status-row,
   .mode-panel:not([data-mode-panel="report"]),
   .primary-button,
   .ghost-button,

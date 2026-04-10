@@ -39,8 +39,6 @@ const elements = {
   sidebarToggle: document.getElementById('sidebarToggle'),
   navItems: Array.from(document.querySelectorAll('[data-mode]')),
   modePanels: Array.from(document.querySelectorAll('[data-mode-panel]')),
-  busyState: document.getElementById('busyState'),
-  statusText: document.getElementById('statusText'),
   projectSelect: document.getElementById('projectSelect'),
   refreshProjectsButton: document.getElementById('refreshProjectsButton'),
   newProjectButton: document.getElementById('newProjectButton'),
@@ -106,9 +104,13 @@ function normalizeText(value) {
 function setBusy(mode, message) {
   state.loading = mode === 'loading';
   state.saving = mode === 'saving';
-  elements.busyState.textContent = mode === 'loading' ? '読み込み中' : mode === 'saving' ? '保存中' : '待機中';
-  elements.busyState.dataset.mode = mode || 'idle';
-  elements.statusText.textContent = message;
+  if (elements.busyState) {
+    elements.busyState.textContent = mode === 'loading' ? '読み込み中' : mode === 'saving' ? '保存中' : '待機中';
+    elements.busyState.dataset.mode = mode || 'idle';
+  }
+  if (elements.statusText) {
+    elements.statusText.textContent = message;
+  }
 }
 
 function setStatus(message) {
