@@ -293,6 +293,15 @@ h3 {
   min-width: 240px;
 }
 
+.report-settings {
+  display: grid;
+  justify-content: end;
+}
+
+.report-contact-field {
+  width: min(22rem, 100%);
+}
+
 .primary-button,
 .ghost-button,
 .tonal-button,
@@ -696,6 +705,14 @@ h3 {
   .subpanel {
     padding: 18px;
     border-radius: 22px;
+  }
+
+  .report-settings {
+    justify-content: stretch;
+  }
+
+  .report-contact-field {
+    width: 100%;
   }
 
   .grid-2,

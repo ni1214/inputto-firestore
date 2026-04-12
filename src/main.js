@@ -6,6 +6,7 @@ import { extractHandaiDataFromPdf } from './gemini.js';
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
 const MODE_STORAGE_KEY = 'inputto_active_mode';
+const CONTACT_OPTIONS = ['高橋', '髙林', '小島', '佐野'];
 
 const state = {
   env: 'production',
@@ -203,7 +204,25 @@ function syncSearchFromForm() {
   state.search.insideOutside = elements.searchInsideOutsideInput.value.trim();
 }
 
+function renderContactOptions(value = '') {
+  if (!elements.projectContactInput) {
+    return;
+  }
+
+  const currentValue = String(value || '').trim();
+  const options = [...CONTACT_OPTIONS];
+  if (currentValue && !options.includes(currentValue)) {
+    options.unshift(currentValue);
+  }
+
+  elements.projectContactInput.innerHTML = [
+    '<option value="">担当を選択</option>',
+    ...options.map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
+  ].join('');
+}
+
 function updateFormInputs() {
+  renderContactOptions(state.project.contact || '');
   elements.projectC2Input.value = state.project.c2 || '';
   elements.projectNameInput.value = state.project.projectName || '';
   elements.projectShortNameInput.value = state.project.shortName || '';
@@ -1222,20 +1241,25 @@ function bindEvents() {
     elements.pdfFileInput.value = '';
   });
 
-  [
+  const formInputs = [
     elements.projectC2Input,
     elements.projectNameInput,
     elements.projectShortNameInput,
     elements.projectContactInput,
     elements.drawingNumberInput,
     elements.drawingStatusInput
-  ].forEach((input) => {
-    input.addEventListener('input', () => {
+  ];
+  formInputs.forEach((input) => {
+    const handleFormChange = () => {
       syncProjectFromForm();
       syncDrawingFromForm();
       renderReport();
       scheduleAutoSave();
-    });
+    };
+    input.addEventListener('input', handleFormChange);
+    if (input.tagName === 'SELECT') {
+      input.addEventListener('change', handleFormChange);
+    }
   });
 
   elements.bulkSymbolsInput?.addEventListener('keydown', (event) => {
