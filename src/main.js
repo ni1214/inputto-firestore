@@ -937,6 +937,11 @@ async function saveCurrent(options = {}) {
     syncSavedSignature();
     await refreshProjects();
     const message = auto ? '自動保存しました。' : '登録完了しました。';
+    if (!auto) {
+      clearProjectState();
+      elements.projectSelect.value = '';
+      setActiveMode('editor');
+    }
     setStatus(message);
     showToast(message, 'success');
   } catch (error) {
