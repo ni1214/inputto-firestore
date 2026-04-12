@@ -302,6 +302,12 @@ h3 {
   width: min(22rem, 100%);
 }
 
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
 .primary-button,
 .ghost-button,
 .tonal-button,
@@ -713,6 +719,15 @@ h3 {
 
   .report-contact-field {
     width: 100%;
+  }
+
+  .form-actions {
+    justify-content: stretch;
+  }
+
+  .form-actions > button {
+    width: 100%;
+    justify-content: center;
   }
 
   .grid-2,
