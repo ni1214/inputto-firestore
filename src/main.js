@@ -7,10 +7,11 @@ const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
 const MODE_STORAGE_KEY = 'inputto_active_mode';
 const CONTACT_OPTIONS = ['高橋', '髙林', '小島', '佐野'];
+const DEFAULT_MODE = 'register';
 
 const state = {
   env: 'production',
-  activeMode: localStorage.getItem(MODE_STORAGE_KEY) || 'editor',
+  activeMode: normalizeMode(localStorage.getItem(MODE_STORAGE_KEY)),
   sidebarCollapsed: localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true',
   loading: false,
   saving: false,
@@ -49,7 +50,9 @@ const elements = {
   navItems: Array.from(document.querySelectorAll('[data-mode]')),
   modePanels: Array.from(document.querySelectorAll('[data-mode-panel]')),
   projectSelect: document.getElementById('projectSelect'),
+  assignmentProjectSelect: document.getElementById('assignmentProjectSelect'),
   refreshProjectsButton: document.getElementById('refreshProjectsButton'),
+  assignmentRefreshProjectsButton: document.getElementById('assignmentRefreshProjectsButton'),
   newProjectButton: document.getElementById('newProjectButton'),
   registerButton: document.getElementById('registerButton'),
   projectC2Input: document.getElementById('projectC2Input'),
@@ -129,6 +132,13 @@ function normalizeText(value) {
     .replace(/\s+/g, '');
 }
 
+function normalizeMode(mode) {
+  if (mode === 'editor') {
+    return DEFAULT_MODE;
+  }
+  return ['register', 'assignment-edit', 'search', 'report'].includes(mode) ? mode : DEFAULT_MODE;
+}
+
 function setBusy(mode, message) {
   state.loading = mode === 'loading';
   state.saving = mode === 'saving';
@@ -179,8 +189,8 @@ function showToast(message, kind = 'info') {
 }
 
 function setActiveMode(mode) {
-  state.activeMode = mode;
-  localStorage.setItem(MODE_STORAGE_KEY, mode);
+  state.activeMode = normalizeMode(mode);
+  localStorage.setItem(MODE_STORAGE_KEY, state.activeMode);
   renderChrome();
 }
 
@@ -269,6 +279,9 @@ function buildProjectOptions(selectedValue) {
 
 function renderProjectSelects() {
   elements.projectSelect.innerHTML = buildProjectOptions(state.project.c2 || '');
+  if (elements.assignmentProjectSelect) {
+    elements.assignmentProjectSelect.innerHTML = buildProjectOptions(state.project.c2 || '');
+  }
   elements.searchProjectSelect.innerHTML = buildProjectOptions(state.search.projectC2 || '');
 }
 
@@ -1175,7 +1188,10 @@ async function saveCurrent(options = {}) {
     if (!auto) {
       clearProjectState();
       elements.projectSelect.value = '';
-      setActiveMode('editor');
+      if (elements.assignmentProjectSelect) {
+        elements.assignmentProjectSelect.value = '';
+      }
+      setActiveMode('register');
     }
     setStatus(message);
     showToast(message, 'success');
@@ -1312,8 +1328,13 @@ function bindEvents() {
   elements.projectSelect.addEventListener('change', async () => {
     await selectProject(elements.projectSelect.value);
   });
+  elements.assignmentProjectSelect?.addEventListener('change', async () => {
+    await selectProject(elements.assignmentProjectSelect.value);
+    renderAssignmentList();
+  });
 
   elements.refreshProjectsButton.addEventListener('click', refreshProjects);
+  elements.assignmentRefreshProjectsButton?.addEventListener('click', refreshProjects);
   elements.newProjectButton.addEventListener('click', () => {
     clearProjectState();
     elements.projectSelect.value = '';
