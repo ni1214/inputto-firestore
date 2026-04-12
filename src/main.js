@@ -601,8 +601,7 @@ async function handlePdfImport(file) {
       state.search.projectC2 = state.project.c2;
     }
     renderAll();
-    setActiveMode('report');
-    showToast('PDFから入力しました。登録で保存できます。', 'success');
+    showToast('PDFから入力しました。工事と手配書で確認して登録できます。', 'success');
   } catch (error) {
     console.error(error);
     showToast(`PDFの読込に失敗しました: ${error.message}`, 'error');
