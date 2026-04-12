@@ -564,6 +564,18 @@ h3 {
   color: var(--text);
 }
 
+.toast a {
+  display: inline-flex;
+  margin-left: 12px;
+  color: var(--primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.toast a:hover {
+  text-decoration: underline;
+}
+
 .toast.is-error {
   border-color: #f2b8c2;
   background: #fff6f7;

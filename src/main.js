@@ -126,17 +126,36 @@ function setStatus(message) {
   setBusy('', message);
 }
 
+function getAiLogicSetupUrl(message) {
+  const matched = String(message || '').match(/https:\/\/console\.firebase\.google\.com\/project\/[^\s]+\/ailogic\/?/);
+  return matched ? matched[0] : '';
+}
+
 function showToast(message, kind = 'info') {
   if (!elements.toastHost || !message) {
     return;
   }
   const toast = document.createElement('div');
   toast.className = `toast${kind === 'error' ? ' is-error' : kind === 'success' ? ' is-success' : ''}`;
-  toast.textContent = message;
+  const setupUrl = getAiLogicSetupUrl(message);
+
+  if (setupUrl) {
+    const text = document.createElement('span');
+    text.textContent = 'Firebase AI Logic が未設定です。';
+    const link = document.createElement('a');
+    link.href = setupUrl;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = '設定を開く';
+    toast.append(text, link);
+  } else {
+    toast.textContent = message;
+  }
+
   elements.toastHost.appendChild(toast);
   window.setTimeout(() => {
     toast.remove();
-  }, 3200);
+  }, setupUrl ? 15000 : 3200);
 }
 
 function setActiveMode(mode) {
