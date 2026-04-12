@@ -662,6 +662,43 @@ h3 {
   background: #f3fbf6;
 }
 
+.toast.is-strong-success {
+  min-width: min(36rem, calc(100vw - 36px));
+  max-width: min(42rem, calc(100vw - 36px));
+  padding: 24px 30px;
+  border-radius: 26px;
+  border-color: #8ed0aa;
+  background: linear-gradient(135deg, #eafff1, #f8fffb);
+  box-shadow: 0 22px 56px rgba(37, 116, 74, 0.24);
+  color: #0f5132;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 1.45rem;
+  font-weight: 700;
+  animation: toast-pop 0.22s ease-out;
+}
+
+.toast.is-strong-success::before {
+  content: "check_circle";
+  font-family: "Material Symbols Outlined";
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (max-width: 1240px) {
   .editor-grid,
   .summary-grid,

@@ -140,7 +140,8 @@ function showToast(message, kind = 'info') {
     return;
   }
   const toast = document.createElement('div');
-  toast.className = `toast${kind === 'error' ? ' is-error' : kind === 'success' ? ' is-success' : ''}`;
+  const strongSuccess = kind === 'success' && ['登録完了', 'PDFから入力'].some((text) => String(message).includes(text));
+  toast.className = `toast${kind === 'error' ? ' is-error' : kind === 'success' ? ' is-success' : ''}${strongSuccess ? ' is-strong-success' : ''}`;
   const setupUrl = getAiLogicSetupUrl(message);
 
   if (setupUrl) {
@@ -159,7 +160,7 @@ function showToast(message, kind = 'info') {
   elements.toastHost.appendChild(toast);
   window.setTimeout(() => {
     toast.remove();
-  }, setupUrl ? 15000 : 3200);
+  }, setupUrl ? 15000 : strongSuccess ? 5200 : 3200);
 }
 
 function setActiveMode(mode) {
