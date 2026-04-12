@@ -415,8 +415,9 @@ h4 {
 .assignment-list {
   display: grid;
   gap: 10px;
-  max-height: 360px;
-  overflow: auto;
+  max-height: min(58vh, 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-right: 4px;
 }
 
@@ -430,15 +431,39 @@ h4 {
 .assignment-group-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   padding: 12px 14px;
   background: #f3f7ff;
+}
+
+.assignment-group-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   cursor: pointer;
 }
 
-.assignment-group-head small {
+.assignment-group-select small {
   color: var(--muted);
   font-weight: 700;
+}
+
+.assignment-toggle {
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: white;
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.assignment-toggle .material-symbols-outlined {
+  font-size: 20px;
 }
 
 .assignment-group-rows {
@@ -865,6 +890,10 @@ h4 {
 
   .assignment-row small {
     grid-column: 2;
+  }
+
+  .assignment-group-head {
+    align-items: flex-start;
   }
 
   .grid-2,
