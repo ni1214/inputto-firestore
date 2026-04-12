@@ -104,6 +104,40 @@
 
               <div class="drawing-tabs" id="drawingTabs"></div>
 
+              <div class="assignment-editor">
+                <div class="section-head">
+                  <h4>登録済み符号の振り分け</h4>
+                  <div class="cluster">
+                    <button id="loadAssignmentButton" type="button" class="tonal-button">
+                      <span class="material-symbols-outlined">sync</span>
+                      <span>登録済みを読込</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="assignment-controls">
+                  <label class="inline-field inline-field-compact">
+                    <span>移動先</span>
+                    <input id="assignmentTargetDrawingInput" type="text" placeholder="例: 1-1">
+                  </label>
+                  <button id="moveAssignmentButton" type="button" class="primary-button">
+                    <span class="material-symbols-outlined">drive_file_move</span>
+                    <span>選択を移動</span>
+                  </button>
+                  <button id="selectAllAssignmentButton" type="button" class="ghost-button">
+                    <span class="material-symbols-outlined">select_all</span>
+                    <span>全選択</span>
+                  </button>
+                  <button id="clearAssignmentSelectionButton" type="button" class="ghost-button">
+                    <span class="material-symbols-outlined">disabled_by_default</span>
+                    <span>解除</span>
+                  </button>
+                  <span id="assignmentSelectedCount" class="count-pill">0件選択</span>
+                </div>
+                <div id="assignmentSymbolsList" class="assignment-list">
+                  <p class="empty-text">登録済みを読込すると、符号をチェックして手配書Noを変更できます。</p>
+                </div>
+              </div>
+
               <label class="field field-span-2">
                 <span>符号をまとめて入れる</span>
                 <textarea

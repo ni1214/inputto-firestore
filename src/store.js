@@ -403,6 +403,100 @@ export async function loadProjectSymbols(env, c2) {
     });
 }
 
+export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds, operator }) {
+  const cleanProject = await saveProjectHeader(env, project, operator);
+  const cleanDrawing = sanitizeDrawing(drawing);
+  const ids = Array.from(new Set((Array.isArray(symbolIds) ? symbolIds : []).map(sanitizeText).filter(Boolean)));
+
+  if (!cleanDrawing.drawingNumber) {
+    throw new Error('移動先の手配書Noを入力してください。');
+  }
+  if (!ids.length) {
+    throw new Error('移動する符号を選択してください。');
+  }
+
+  const [drawingSnapshot, symbolSnapshot] = await Promise.all([
+    getDocs(drawingsRef(env, cleanProject.c2)),
+    getDocs(symbolsRef(env, cleanProject.c2))
+  ]);
+  const normalizedDrawingNumber = normalizeText(cleanDrawing.drawingNumber);
+  const existingDrawing = drawingSnapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .find((item) => normalizeText(item.drawingNumber) === normalizedDrawingNumber);
+  const drawingId = sanitizeText(drawing.id) || existingDrawing?.id || makeDrawingId(cleanDrawing.drawingNumber);
+  const drawingStatus = cleanDrawing.drawingStatus || sanitizeText(existingDrawing?.drawingStatus);
+  const selectedIdSet = new Set(ids);
+  const selectedEntries = symbolSnapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .filter((item) => selectedIdSet.has(item.id));
+
+  if (selectedEntries.length !== ids.length) {
+    throw new Error('選択した符号の一部が見つかりません。登録済み一覧を読み込み直してください。');
+  }
+
+  const writes = [];
+  writes.push((batch) => {
+    batch.set(
+      drawingRef(env, cleanProject.c2, drawingId),
+      {
+        drawingId,
+        drawingNumber: cleanDrawing.drawingNumber,
+        drawingStatus,
+        contact: cleanProject.contact,
+        updatedAt: serverTimestamp(),
+        updatedBy: sanitizeText(operator)
+      },
+      { merge: true }
+    );
+  });
+
+  selectedEntries.forEach((entry) => {
+    writes.push((batch) => {
+      batch.set(
+        symbolRef(env, cleanProject.c2, entry.id),
+        {
+          c2: cleanProject.c2,
+          projectName: cleanProject.projectName,
+          shortName: cleanProject.shortName,
+          contact: cleanProject.contact,
+          drawingId,
+          drawingNumber: cleanDrawing.drawingNumber,
+          drawingStatus,
+          updatedAt: serverTimestamp(),
+          updatedBy: sanitizeText(operator)
+        },
+        { merge: true }
+      );
+    });
+  });
+
+  await commitChunked(writes);
+
+  const summary = await recalculateProjectSummaries(env, cleanProject.c2, operator);
+  const rowsSnapshot = await getDocs(query(symbolsRef(env, cleanProject.c2), where('drawingId', '==', drawingId)));
+
+  return {
+    project: {
+      ...cleanProject,
+      drawingCount: summary.project.drawingCount,
+      symbolCount: summary.project.symbolCount
+    },
+    drawing: {
+      id: drawingId,
+      drawingNumber: cleanDrawing.drawingNumber,
+      drawingStatus
+    },
+    drawings: summary.drawings,
+    rows: rowsSnapshot.docs
+      .map((item) => ({
+        uiId: crypto.randomUUID(),
+        docId: item.id,
+        ...item.data()
+      }))
+      .sort(sortSymbolsByLabel)
+  };
+}
+
 export async function saveProjectHeader(env, project, operator) {
   const cleanProject = sanitizeProject(project);
   if (!cleanProject.c2) {

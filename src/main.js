@@ -1,6 +1,6 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
-import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
+import { assignSymbolsToDrawing, listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
 import { extractHandaiDataFromPdf } from './gemini.js';
 
 const SAVE_ACTOR = 'system';
@@ -23,6 +23,11 @@ const state = {
   rows: [],
   selectedRowIds: new Set(),
   filterText: '',
+  assignment: {
+    rows: [],
+    selectedDocIds: new Set(),
+    targetDrawingNumber: ''
+  },
   search: {
     projectC2: '',
     keyword: '',
@@ -53,6 +58,13 @@ const elements = {
   drawingStatusInput: document.getElementById('drawingStatusInput'),
   loadDrawingButton: document.getElementById('loadDrawingButton'),
   drawingTabs: document.getElementById('drawingTabs'),
+  assignmentSymbolsList: document.getElementById('assignmentSymbolsList'),
+  assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
+  assignmentSelectedCount: document.getElementById('assignmentSelectedCount'),
+  loadAssignmentButton: document.getElementById('loadAssignmentButton'),
+  moveAssignmentButton: document.getElementById('moveAssignmentButton'),
+  selectAllAssignmentButton: document.getElementById('selectAllAssignmentButton'),
+  clearAssignmentSelectionButton: document.getElementById('clearAssignmentSelectionButton'),
   bulkSymbolsInput: document.getElementById('bulkSymbolsInput'),
   applyBulkSymbolsButton: document.getElementById('applyBulkSymbolsButton'),
   clearBulkSymbolsButton: document.getElementById('clearBulkSymbolsButton'),
@@ -275,6 +287,76 @@ function renderDrawingTabs() {
           <span>${escapeHtml(drawing.drawingNumber || '-')}</span>
           <small>${escapeHtml(String(drawing.rowCount || 0))}件</small>
         </button>
+      `;
+    })
+    .join('');
+}
+
+function getAssignmentGroups() {
+  const groups = new Map();
+  state.assignment.rows.forEach((row) => {
+    const key = row.drawingId || '__unassigned';
+    const group = groups.get(key) || {
+      key,
+      drawingNumber: row.drawingNumber || '未割当',
+      drawingId: row.drawingId || '',
+      rows: []
+    };
+    group.rows.push(row);
+    groups.set(key, group);
+  });
+  return Array.from(groups.values()).sort((left, right) =>
+    String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', { numeric: true })
+  );
+}
+
+function renderAssignmentList() {
+  if (!elements.assignmentSymbolsList) {
+    return;
+  }
+
+  if (elements.assignmentTargetDrawingInput) {
+    elements.assignmentTargetDrawingInput.value = state.assignment.targetDrawingNumber || '';
+  }
+  if (elements.assignmentSelectedCount) {
+    elements.assignmentSelectedCount.textContent = `${state.assignment.selectedDocIds.size}件選択`;
+  }
+
+  if (!state.project.c2) {
+    elements.assignmentSymbolsList.innerHTML = '<p class="empty-text">工事を選ぶと登録済み符号を読み込めます。</p>';
+    return;
+  }
+  if (!state.assignment.rows.length) {
+    elements.assignmentSymbolsList.innerHTML = '<p class="empty-text">登録済みを読込すると、符号をチェックして手配書Noを変更できます。</p>';
+    return;
+  }
+
+  elements.assignmentSymbolsList.innerHTML = getAssignmentGroups()
+    .map((group) => {
+      const allSelected = group.rows.every((row) => state.assignment.selectedDocIds.has(row.docId));
+      const rows = group.rows
+        .map((row) => {
+          const checked = state.assignment.selectedDocIds.has(row.docId) ? ' checked' : '';
+          const detail = [row.name, row.floor, row.insideOutside].filter(Boolean).join(' / ');
+          return `
+            <label class="assignment-row">
+              <input type="checkbox" data-assignment-symbol="${escapeHtml(row.docId)}"${checked}>
+              <span class="assignment-symbol">${escapeHtml(row.symbol || '-')}</span>
+              <small>${escapeHtml(detail)}</small>
+            </label>
+          `;
+        })
+        .join('');
+
+      return `
+        <article class="assignment-group">
+          <label class="assignment-group-head">
+            <input type="checkbox" data-assignment-group="${escapeHtml(group.key)}"${allSelected ? ' checked' : ''}>
+            <strong>${escapeHtml(group.drawingNumber)}</strong>
+            <small>${group.rows.length}件</small>
+          </label>
+          <div class="assignment-group-rows">${rows}</div>
+        </article>
       `;
     })
     .join('');
@@ -782,6 +864,7 @@ function renderAll() {
   renderChrome();
   renderProjectSelects();
   renderDrawingTabs();
+  renderAssignmentList();
   renderRows();
   renderSearchResults();
 }
@@ -806,11 +889,20 @@ function resetDrawingState() {
   syncBulkSymbolsInput([]);
 }
 
+function resetAssignmentState() {
+  state.assignment = {
+    rows: [],
+    selectedDocIds: new Set(),
+    targetDrawingNumber: ''
+  };
+}
+
 function clearProjectState() {
   clearAutoSaveTimer();
   state.project = { ...PROJECT_TEMPLATE };
   state.drawings = [];
   resetDrawingState();
+  resetAssignmentState();
   syncSavedSignature();
   renderAll();
 }
@@ -836,6 +928,7 @@ async function selectProject(c2) {
       state.search.projectC2 = state.project.c2;
     }
     resetDrawingState();
+    resetAssignmentState();
     renderAll();
     syncSavedSignature();
     setStatus(`工事 ${c2} を読み込みました。`);
@@ -883,6 +976,101 @@ async function loadCurrentDrawing() {
   } catch (error) {
     console.error(error);
     setStatus(`手配書の読込に失敗しました: ${error.message}`);
+  }
+}
+
+async function loadAssignmentSymbols(options = {}) {
+  const { silent = false } = options;
+  syncProjectFromForm();
+
+  if (!state.project.c2) {
+    showToast('先に工事を選んでください。', 'error');
+    return;
+  }
+
+  if (!silent) {
+    setBusy('loading', '登録済み符号を読み込んでいます。');
+  }
+  try {
+    state.assignment.rows = await loadProjectSymbols(state.env, state.project.c2);
+    state.assignment.selectedDocIds = new Set(
+      Array.from(state.assignment.selectedDocIds).filter((docId) =>
+        state.assignment.rows.some((row) => row.docId === docId)
+      )
+    );
+    renderAssignmentList();
+    if (!silent) {
+      setStatus(`${state.assignment.rows.length}件の登録済み符号を読み込みました。`);
+    }
+  } catch (error) {
+    console.error(error);
+    const message = `登録済み符号の読込に失敗しました: ${error.message}`;
+    setStatus(message);
+    showToast(message, 'error');
+  }
+}
+
+async function moveSelectedAssignmentSymbols() {
+  syncProjectFromForm();
+  syncDrawingFromForm();
+  const targetDrawingNumber = String(state.assignment.targetDrawingNumber || '').trim();
+  const selectedIds = Array.from(state.assignment.selectedDocIds);
+
+  if (!state.project.c2 || !state.project.projectName) {
+    showToast('先に工事を選んでください。', 'error');
+    return;
+  }
+  if (!selectedIds.length) {
+    showToast('移動する符号をチェックしてください。', 'error');
+    return;
+  }
+  if (!targetDrawingNumber) {
+    showToast('移動先の手配書Noを入力してください。', 'error');
+    elements.assignmentTargetDrawingInput?.focus();
+    return;
+  }
+
+  setBusy('saving', '手配書Noを変更しています。');
+  try {
+    const response = await assignSymbolsToDrawing({
+      env: state.env,
+      project: state.project,
+      drawing: {
+        drawingNumber: targetDrawingNumber,
+        drawingStatus: state.drawing.drawingNumber === targetDrawingNumber ? state.drawing.drawingStatus : ''
+      },
+      symbolIds: selectedIds,
+      operator: SAVE_ACTOR
+    });
+
+    state.project = {
+      ...state.project,
+      ...response.project
+    };
+    state.drawings = response.drawings || state.drawings;
+    state.selectedDrawingId = response.drawing.id;
+    state.drawing = {
+      id: response.drawing.id,
+      drawingNumber: response.drawing.drawingNumber || '',
+      drawingStatus: response.drawing.drawingStatus || ''
+    };
+    state.rows = Array.isArray(response.rows) && response.rows.length ? response.rows : [createUiRow()];
+    state.selectedRowIds = new Set();
+    state.assignment.selectedDocIds = new Set();
+    state.assignment.targetDrawingNumber = '';
+    syncBulkSymbolsInput(state.rows);
+    renderAll();
+    syncSavedSignature();
+    await refreshProjects();
+    await loadAssignmentSymbols({ silent: true });
+    const message = `${selectedIds.length}件を手配書No ${targetDrawingNumber} に移動しました。`;
+    setStatus(message);
+    showToast(message, 'success');
+  } catch (error) {
+    console.error(error);
+    const message = `手配書Noの変更に失敗しました: ${error.message}`;
+    setStatus(message);
+    showToast(message, 'error');
   }
 }
 
@@ -1093,6 +1281,56 @@ function bindEvents() {
     void saveCurrent();
   });
   elements.loadDrawingButton.addEventListener('click', loadCurrentDrawing);
+  elements.loadAssignmentButton.addEventListener('click', () => {
+    void loadAssignmentSymbols();
+  });
+  elements.moveAssignmentButton.addEventListener('click', () => {
+    void moveSelectedAssignmentSymbols();
+  });
+  elements.selectAllAssignmentButton.addEventListener('click', () => {
+    state.assignment.selectedDocIds = new Set(state.assignment.rows.map((row) => row.docId).filter(Boolean));
+    renderAssignmentList();
+  });
+  elements.clearAssignmentSelectionButton.addEventListener('click', () => {
+    state.assignment.selectedDocIds = new Set();
+    renderAssignmentList();
+  });
+  elements.assignmentTargetDrawingInput.addEventListener('input', () => {
+    state.assignment.targetDrawingNumber = elements.assignmentTargetDrawingInput.value;
+  });
+  elements.assignmentSymbolsList.addEventListener('change', (event) => {
+    const symbolCheckbox = event.target.closest('[data-assignment-symbol]');
+    if (symbolCheckbox) {
+      const docId = symbolCheckbox.dataset.assignmentSymbol;
+      if (symbolCheckbox.checked) {
+        state.assignment.selectedDocIds.add(docId);
+      } else {
+        state.assignment.selectedDocIds.delete(docId);
+      }
+      renderAssignmentList();
+      return;
+    }
+
+    const groupCheckbox = event.target.closest('[data-assignment-group]');
+    if (!groupCheckbox) {
+      return;
+    }
+    const group = getAssignmentGroups().find((item) => item.key === groupCheckbox.dataset.assignmentGroup);
+    if (!group) {
+      return;
+    }
+    group.rows.forEach((row) => {
+      if (!row.docId) {
+        return;
+      }
+      if (groupCheckbox.checked) {
+        state.assignment.selectedDocIds.add(row.docId);
+      } else {
+        state.assignment.selectedDocIds.delete(row.docId);
+      }
+    });
+    renderAssignmentList();
+  });
   elements.applyBulkSymbolsButton.addEventListener('click', applyBulkSymbols);
   elements.clearBulkSymbolsButton.addEventListener('click', clearBulkSymbols);
   elements.addRowButton.addEventListener('click', addRow);
