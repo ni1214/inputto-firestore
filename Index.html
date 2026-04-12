@@ -49,6 +49,10 @@
                   <span class="material-symbols-outlined">add</span>
                   <span>新規工事</span>
                 </button>
+                <button id="registerButton" type="button" class="primary-button">
+                  <span class="material-symbols-outlined">app_registration</span>
+                  <span>登録</span>
+                </button>
               </div>
             </div>
 
@@ -199,6 +203,10 @@
             <div class="mode-header">
               <h2>検査表 / ラベル</h2>
               <div class="cluster">
+                <button id="reportRegisterButton" type="button" class="primary-button">
+                  <span class="material-symbols-outlined">app_registration</span>
+                  <span>登録</span>
+                </button>
                 <button id="printButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">print</span>
                   <span>印刷</span>
@@ -297,6 +305,13 @@
         <span class="material-symbols-outlined">upload_file</span>
         <strong>PDFをドロップ</strong>
         <span>手配書を読み取ります</span>
+      </div>
+    </div>
+    <div class="pdf-busy-overlay" id="pdfBusyOverlay" hidden aria-hidden="true" role="alert" aria-live="assertive">
+      <div class="pdf-busy-card">
+        <span class="pdf-spinner" aria-hidden="true"></span>
+        <strong>PDF解析中</strong>
+        <span>AIで手配書を読み取っています。この画面を閉じないでください。</span>
       </div>
     </div>
   </body>

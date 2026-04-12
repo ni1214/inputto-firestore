@@ -1,12 +1,11 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
-import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle, saveDrawingSymbolBatch } from './store.js';
+import { listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
 import { extractHandaiDataFromPdf } from './gemini.js';
 
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
 const MODE_STORAGE_KEY = 'inputto_active_mode';
-const AUTO_SAVE_DELAY_MS = 1200;
 
 const state = {
   env: 'production',
@@ -14,6 +13,7 @@ const state = {
   sidebarCollapsed: localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true',
   loading: false,
   saving: false,
+  analyzingPdf: false,
   projects: [],
   project: { ...PROJECT_TEMPLATE },
   drawings: [],
@@ -43,6 +43,7 @@ const elements = {
   projectSelect: document.getElementById('projectSelect'),
   refreshProjectsButton: document.getElementById('refreshProjectsButton'),
   newProjectButton: document.getElementById('newProjectButton'),
+  registerButton: document.getElementById('registerButton'),
   projectC2Input: document.getElementById('projectC2Input'),
   projectNameInput: document.getElementById('projectNameInput'),
   projectShortNameInput: document.getElementById('projectShortNameInput'),
@@ -57,6 +58,7 @@ const elements = {
   pickPdfButton: document.getElementById('pickPdfButton'),
   pdfFileInput: document.getElementById('pdfFileInput'),
   appDropOverlay: document.getElementById('appDropOverlay'),
+  pdfBusyOverlay: document.getElementById('pdfBusyOverlay'),
   filterInput: document.getElementById('filterInput'),
   addRowButton: document.getElementById('addRowButton'),
   duplicateRowButton: document.getElementById('duplicateRowButton'),
@@ -77,6 +79,7 @@ const elements = {
   summaryLabels: document.getElementById('summaryLabels'),
   inspectionTableBody: document.getElementById('inspectionTableBody'),
   labelPages: document.getElementById('labelPages'),
+  reportRegisterButton: document.getElementById('reportRegisterButton'),
   printButton: document.getElementById('printButton'),
   toastHost: document.getElementById('toastHost')
 };
@@ -413,17 +416,6 @@ function canAutoSave() {
 
 function scheduleAutoSave() {
   clearAutoSaveTimer();
-  if (!canAutoSave()) {
-    return;
-  }
-  const nextSignature = computeSaveSignature();
-  if (nextSignature === lastSavedSignature) {
-    return;
-  }
-  autoSaveTimerId = window.setTimeout(() => {
-    autoSaveTimerId = null;
-    void saveCurrent({ auto: true });
-  }, AUTO_SAVE_DELAY_MS);
 }
 
 async function applyBulkSymbols() {
@@ -441,43 +433,6 @@ async function applyBulkSymbols() {
   }
   if (!state.drawing.drawingNumber) {
     showToast('先に手配書Noを入れてください。', 'error');
-    return;
-  }
-
-  try {
-    const response = await saveDrawingSymbolBatch({
-      env: state.env,
-      project: state.project,
-      drawing: { ...state.drawing, id: state.selectedDrawingId },
-      symbols,
-      operator: SAVE_ACTOR
-    });
-
-    state.project = {
-      ...state.project,
-      ...response.project
-    };
-    if (response.drawings) {
-      state.drawings = response.drawings.sort((left, right) => String(left.drawingNumber || '').localeCompare(String(right.drawingNumber || ''), 'ja', { numeric: true }));
-    }
-    if (response.drawing) {
-      state.selectedDrawingId = response.drawing.id;
-      state.drawing = {
-        ...state.drawing,
-        ...response.drawing
-      };
-    }
-    state.rows = Array.isArray(response.rows) && response.rows.length ? response.rows : [createUiRow()];
-    state.selectedRowIds = new Set();
-    syncBulkSymbolsInput(state.rows);
-    renderAll();
-    syncSavedSignature();
-    await refreshProjects();
-    showToast('符号を反映しました。', 'success');
-    return;
-  } catch (error) {
-    console.error(error);
-    showToast(`符号の反映に失敗しました: ${error.message}`, 'error');
     return;
   }
 
@@ -500,8 +455,8 @@ async function applyBulkSymbols() {
   if (elements.bulkSymbolsInput) {
     elements.bulkSymbolsInput.value = '';
   }
-  setStatus(`${symbols.length}件の符号を追加しました。`);
-  showToast(`${symbols.length}件の符号を追加しました。`, 'success');
+  setStatus(`${symbols.length}件の符号を反映しました。登録ボタンで保存できます。`);
+  showToast(`${symbols.length}件の符号を反映しました。登録で保存できます。`, 'success');
   scheduleAutoSave();
 }
 
@@ -547,6 +502,34 @@ function resetAppDropState() {
   hideAppDropOverlay();
 }
 
+function setPdfAnalysisBusy(active) {
+  state.analyzingPdf = active;
+  document.body.classList.toggle('is-pdf-analyzing', active);
+
+  if (!elements.pdfBusyOverlay) {
+    return;
+  }
+
+  if (active) {
+    elements.pdfBusyOverlay.hidden = false;
+    elements.pdfBusyOverlay.setAttribute('aria-hidden', 'false');
+    window.requestAnimationFrame(() => {
+      if (state.analyzingPdf) {
+        elements.pdfBusyOverlay?.classList.add('is-active');
+      }
+    });
+    return;
+  }
+
+  elements.pdfBusyOverlay.classList.remove('is-active');
+  elements.pdfBusyOverlay.setAttribute('aria-hidden', 'true');
+  window.setTimeout(() => {
+    if (!elements.pdfBusyOverlay?.classList.contains('is-active')) {
+      elements.pdfBusyOverlay.hidden = true;
+    }
+  }, 180);
+}
+
 function isFileDragEvent(event) {
   const types = Array.from(event.dataTransfer?.types || []);
   return types.includes('Files');
@@ -566,6 +549,7 @@ async function handlePdfImport(file) {
   }
 
   setBusy('loading', 'PDFを解析しています。');
+  setPdfAnalysisBusy(true);
   document.body.classList.add('is-importing-pdf');
   elements.pickPdfButton?.setAttribute('disabled', 'disabled');
   try {
@@ -599,15 +583,14 @@ async function handlePdfImport(file) {
     }
     renderAll();
     setActiveMode('report');
-    syncSavedSignature();
-    scheduleAutoSave();
-    showToast('PDFから入力しました。', 'success');
+    showToast('PDFから入力しました。登録で保存できます。', 'success');
   } catch (error) {
     console.error(error);
     showToast(`PDFの読込に失敗しました: ${error.message}`, 'error');
   } finally {
     elements.pickPdfButton?.removeAttribute('disabled');
     document.body.classList.remove('is-importing-pdf');
+    setPdfAnalysisBusy(false);
     resetAppDropState();
     setBusy('', '');
   }
@@ -890,6 +873,11 @@ async function saveCurrent(options = {}) {
   syncDrawingFromForm();
 
   if (!canAutoSave()) {
+    if (!auto) {
+      const message = '登録できません。工事番号・工事名・手配書No・符号の未入力を確認してください。';
+      setStatus(message);
+      showToast(message, 'error');
+    }
     return;
   }
   const nextSignature = computeSaveSignature();
@@ -930,10 +918,14 @@ async function saveCurrent(options = {}) {
     renderAll();
     syncSavedSignature();
     await refreshProjects();
-    setStatus(auto ? '自動保存しました。' : '保存しました。');
+    const message = auto ? '自動保存しました。' : '登録完了しました。';
+    setStatus(message);
+    showToast(message, 'success');
   } catch (error) {
     console.error(error);
-    setStatus(`保存に失敗しました: ${error.message}`);
+    const message = `登録に失敗しました: ${error.message}`;
+    setStatus(message);
+    showToast(message, 'error');
   }
 }
 
@@ -1070,6 +1062,12 @@ function bindEvents() {
     elements.projectC2Input.focus();
     setStatus('新規工事入力に切り替えました。');
   });
+  elements.registerButton?.addEventListener('click', () => {
+    void saveCurrent();
+  });
+  elements.reportRegisterButton?.addEventListener('click', () => {
+    void saveCurrent();
+  });
   elements.loadDrawingButton.addEventListener('click', loadCurrentDrawing);
   elements.applyBulkSymbolsButton.addEventListener('click', applyBulkSymbols);
   elements.clearBulkSymbolsButton.addEventListener('click', clearBulkSymbols);
@@ -1091,6 +1089,15 @@ function bindEvents() {
   elements.printButton.addEventListener('click', () => {
     setActiveMode('report');
     window.print();
+  });
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!state.analyzingPdf) {
+      return undefined;
+    }
+    event.preventDefault();
+    event.returnValue = '';
+    return '';
   });
 
   elements.drawingTabs.addEventListener('click', async (event) => {
