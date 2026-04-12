@@ -87,12 +87,6 @@
             <section class="subpanel stack-lg">
               <div class="section-head">
                 <h3>手配書</h3>
-                <div class="cluster">
-                  <button id="loadDrawingButton" type="button" class="tonal-button">
-                    <span class="material-symbols-outlined">folder_open</span>
-                    <span>読込</span>
-                  </button>
-                </div>
               </div>
 
               <div class="grid-2">
@@ -105,9 +99,6 @@
                   <input id="drawingStatusInput" type="text" placeholder="">
                 </label>
               </div>
-
-              <div class="drawing-tabs" id="drawingTabs"></div>
-
               <label class="field field-span-2">
                 <span>符号をまとめて入れる</span>
                 <textarea
@@ -168,6 +159,51 @@
                 </select>
               </label>
             </section>
+
+            <section class="subpanel stack-lg">
+              <div class="section-head">
+                <h3>手配書タブ</h3>
+              </div>
+              <div class="drawing-tabs" id="drawingTabs"></div>
+            </section>
+
+            <section class="subpanel stack-lg">
+              <div class="section-head">
+                <h3>符号データ</h3>
+                <div class="cluster">
+                  <label class="inline-field inline-field-compact">
+                    <span>絞込</span>
+                    <input id="filterInput" type="text" placeholder="符号 / 品名 / フロア">
+                  </label>
+                  <button id="addRowButton" type="button" class="ghost-button">
+                    <span class="material-symbols-outlined">add_row_below</span>
+                    <span>行追加</span>
+                  </button>
+                  <button id="duplicateRowButton" type="button" class="ghost-button">
+                    <span class="material-symbols-outlined">content_copy</span>
+                    <span>複製</span>
+                  </button>
+                  <button id="deleteRowsButton" type="button" class="danger-button">
+                    <span class="material-symbols-outlined">delete</span>
+                    <span>選択削除</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead id="tableHead"></thead>
+                  <tbody id="tableBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <div class="form-actions">
+              <button id="reportRegisterButton" type="button" class="primary-button">
+                <span class="material-symbols-outlined">app_registration</span>
+                <span>登録</span>
+              </button>
+            </div>
 
             <section class="subpanel stack-lg assignment-editor">
               <div class="section-head">
@@ -312,37 +348,6 @@
 
             <section class="subpanel stack-lg">
               <div class="section-head">
-                <h3>符号データ</h3>
-                <div class="cluster">
-                  <label class="inline-field inline-field-compact">
-                    <span>絞込</span>
-                    <input id="filterInput" type="text" placeholder="符号 / 品名 / フロア">
-                  </label>
-                  <button id="addRowButton" type="button" class="ghost-button">
-                    <span class="material-symbols-outlined">add_row_below</span>
-                    <span>行追加</span>
-                  </button>
-                  <button id="duplicateRowButton" type="button" class="ghost-button">
-                    <span class="material-symbols-outlined">content_copy</span>
-                    <span>複製</span>
-                  </button>
-                  <button id="deleteRowsButton" type="button" class="danger-button">
-                    <span class="material-symbols-outlined">delete</span>
-                    <span>選択削除</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="table-wrap">
-                <table class="data-table">
-                  <thead id="tableHead"></thead>
-                  <tbody id="tableBody"></tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="subpanel stack-lg">
-              <div class="section-head">
                 <h3>検査表</h3>
               </div>
 
@@ -371,13 +376,6 @@
               </div>
               <div class="label-pages" id="labelPages"></div>
             </section>
-
-            <div class="form-actions">
-              <button id="reportRegisterButton" type="button" class="primary-button">
-                <span class="material-symbols-outlined">app_registration</span>
-                <span>登録</span>
-              </button>
-            </div>
           </section>
         </section>
       </div>

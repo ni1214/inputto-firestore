@@ -61,7 +61,6 @@ const elements = {
   projectContactInput: document.getElementById('projectContactInput'),
   drawingNumberInput: document.getElementById('drawingNumberInput'),
   drawingStatusInput: document.getElementById('drawingStatusInput'),
-  loadDrawingButton: document.getElementById('loadDrawingButton'),
   drawingTabs: document.getElementById('drawingTabs'),
   assignmentSymbolsList: document.getElementById('assignmentSymbolsList'),
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
@@ -291,7 +290,7 @@ function renderDrawingTabs() {
     return;
   }
   if (!state.drawings.length) {
-    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ手配書がありません。手配書Noを入れて読込すると、新しい手配書として入力できます。</p>';
+    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
     return;
   }
 
@@ -1134,7 +1133,7 @@ async function moveSelectedAssignmentSymbols() {
 }
 
 async function saveCurrent(options = {}) {
-  const { auto = false } = options;
+  const { auto = false, resetAfterSave = !auto } = options;
   syncProjectFromForm();
   syncDrawingFromForm();
 
@@ -1185,7 +1184,7 @@ async function saveCurrent(options = {}) {
     syncSavedSignature();
     await refreshProjects();
     const message = auto ? '自動保存しました。' : '登録完了しました。';
-    if (!auto) {
+    if (resetAfterSave) {
       clearProjectState();
       elements.projectSelect.value = '';
       if (elements.assignmentProjectSelect) {
@@ -1207,6 +1206,19 @@ function addRow() {
   state.rows.push(createUiRow());
   renderRows();
   scheduleAutoSave();
+}
+
+function startNewProject() {
+  clearProjectState();
+  elements.projectSelect.value = '';
+  if (elements.assignmentProjectSelect) {
+    elements.assignmentProjectSelect.value = '';
+  }
+  updateFormInputs();
+  renderAssignmentList();
+  setActiveMode('register');
+  elements.projectC2Input.focus();
+  setStatus('新規工事入力に切り替えました。');
 }
 
 function duplicateSelectedRows() {
@@ -1315,7 +1327,7 @@ async function openSearchResult(index) {
   };
   updateFormInputs();
   await loadCurrentDrawing();
-  setActiveMode('report');
+  setActiveMode('assignment-edit');
 }
 
 function bindEvents() {
@@ -1336,18 +1348,14 @@ function bindEvents() {
   elements.refreshProjectsButton.addEventListener('click', refreshProjects);
   elements.assignmentRefreshProjectsButton?.addEventListener('click', refreshProjects);
   elements.newProjectButton.addEventListener('click', () => {
-    clearProjectState();
-    elements.projectSelect.value = '';
-    elements.projectC2Input.focus();
-    setStatus('新規工事入力に切り替えました。');
+    startNewProject();
   });
   elements.registerButton?.addEventListener('click', () => {
     void saveCurrent();
   });
   elements.reportRegisterButton?.addEventListener('click', () => {
-    void saveCurrent();
+    void saveCurrent({ resetAfterSave: false });
   });
-  elements.loadDrawingButton.addEventListener('click', loadCurrentDrawing);
   elements.loadAssignmentButton.addEventListener('click', () => {
     void loadAssignmentSymbols();
   });
