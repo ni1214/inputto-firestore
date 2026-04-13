@@ -33,6 +33,8 @@ const state = {
     filterText: '',
     collapsedGroupKeys: new Set(),
     activeGroupKeys: new Set(),
+    boxes: [],
+    activeBoxId: '',
     history: []
   },
   search: {
@@ -73,8 +75,13 @@ const elements = {
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
   assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
   assignmentSelectedCount: document.getElementById('assignmentSelectedCount'),
+  assignmentBoxesList: document.getElementById('assignmentBoxesList'),
   loadAssignmentButton: document.getElementById('loadAssignmentButton'),
-  moveAssignmentButton: document.getElementById('moveAssignmentButton'),
+  addAssignmentBoxButton: document.getElementById('addAssignmentBoxButton'),
+  addSelectionToBoxButton: document.getElementById('addSelectionToBoxButton'),
+  addVisibleToBoxButton: document.getElementById('addVisibleToBoxButton'),
+  applyAssignmentBoxesButton: document.getElementById('applyAssignmentBoxesButton'),
+  clearAssignmentBoxesButton: document.getElementById('clearAssignmentBoxesButton'),
   selectAllAssignmentButton: document.getElementById('selectAllAssignmentButton'),
   clearAssignmentSelectionButton: document.getElementById('clearAssignmentSelectionButton'),
   bulkSymbolsInput: document.getElementById('bulkSymbolsInput'),
@@ -426,14 +433,77 @@ function getAssignmentSelectionKey(row) {
 
 function getSelectedAssignmentDocIds() {
   const selectedKeys = state.assignment.selectedDocIds;
-  return Array.from(
-    new Set(
-      state.assignment.rows
-        .filter((row) => selectedKeys.has(getAssignmentSelectionKey(row)))
-        .map((row) => row.docId)
-        .filter(Boolean)
-    )
-  );
+  return getAssignmentDocIdsForKeys(selectedKeys);
+}
+
+function getAssignmentRowsForKeys(rowKeys) {
+  const keySet = rowKeys instanceof Set ? rowKeys : new Set(rowKeys);
+  return state.assignment.rows.filter((row) => keySet.has(getAssignmentSelectionKey(row)));
+}
+
+function getAssignmentDocIdsForKeys(rowKeys) {
+  return Array.from(new Set(getAssignmentRowsForKeys(rowKeys).map((row) => row.docId).filter(Boolean)));
+}
+
+function createAssignmentBox(targetDrawingNumber) {
+  const normalizedTarget = String(targetDrawingNumber || '').trim();
+  if (!normalizedTarget) {
+    return null;
+  }
+  const existing = state.assignment.boxes.find((box) => normalizeText(box.targetDrawingNumber) === normalizeText(normalizedTarget));
+  if (existing) {
+    state.assignment.activeBoxId = existing.id;
+    return existing;
+  }
+  const box = {
+    id: crypto.randomUUID(),
+    targetDrawingNumber: normalizedTarget,
+    rowKeys: new Set()
+  };
+  state.assignment.boxes.push(box);
+  state.assignment.activeBoxId = box.id;
+  return box;
+}
+
+function getActiveAssignmentBox() {
+  return state.assignment.boxes.find((box) => box.id === state.assignment.activeBoxId) || state.assignment.boxes[0] || null;
+}
+
+function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = state.assignment.targetDrawingNumber) {
+  const normalizedTarget = String(targetDrawingNumber || '').trim();
+  const box = normalizedTarget ? createAssignmentBox(normalizedTarget) : getActiveAssignmentBox();
+  if (!box) {
+    showToast('箱の手配書Noを入力してください。', 'error');
+    elements.assignmentTargetDrawingInput?.focus();
+    return false;
+  }
+  const keys = Array.from(rowKeys || []).filter(Boolean);
+  if (!keys.length) {
+    showToast('箱に入れる符号を選んでください。', 'error');
+    return false;
+  }
+
+  state.assignment.boxes.forEach((item) => {
+    keys.forEach((key) => item.rowKeys.delete(key));
+  });
+  keys.forEach((key) => box.rowKeys.add(key));
+  state.assignment.selectedDocIds = new Set();
+  renderAssignmentBoxes();
+  renderAssignmentList();
+  return true;
+}
+
+function getAssignmentBoxForRowKey(rowKey) {
+  return state.assignment.boxes.find((box) => box.rowKeys?.has(rowKey)) || null;
+}
+
+function removeAssignmentBox(boxId) {
+  state.assignment.boxes = state.assignment.boxes.filter((box) => box.id !== boxId);
+  if (state.assignment.activeBoxId === boxId) {
+    state.assignment.activeBoxId = state.assignment.boxes[0]?.id || '';
+  }
+  renderAssignmentBoxes();
+  renderAssignmentList();
 }
 
 function renderAssignmentList() {
@@ -486,12 +556,13 @@ function renderAssignmentList() {
         .map((row) => {
           const rowKey = getAssignmentSelectionKey(row);
           const checked = state.assignment.selectedDocIds.has(rowKey) ? ' checked' : '';
+          const pendingBox = getAssignmentBoxForRowKey(rowKey);
           const detail = [row.name, row.floor, row.insideOutside].filter(Boolean).join(' / ');
           return `
-            <label class="assignment-row">
+            <label class="assignment-row${pendingBox ? ' is-boxed' : ''}">
               <input type="checkbox" data-assignment-symbol="${escapeHtml(rowKey)}"${checked}>
               <span class="assignment-symbol">${escapeHtml(row.symbol || '-')}</span>
-              <small>${escapeHtml(detail)}</small>
+              <small>${escapeHtml(detail)}${pendingBox ? `<b>箱 ${escapeHtml(pendingBox.targetDrawingNumber)}</b>` : ''}</small>
             </label>
           `;
         })
@@ -560,6 +631,39 @@ function renderAssignmentHistory() {
           <strong>${escapeHtml(action)}: ${escapeHtml(sources)} → ${escapeHtml(target)}</strong>
           <span>${escapeHtml(String(item.symbolCount || 0))}件${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
           <small>${escapeHtml(formatHistoryDate(item.createdAt))}</small>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function renderAssignmentBoxes() {
+  if (!elements.assignmentBoxesList) {
+    return;
+  }
+  if (!state.assignment.boxes.length) {
+    elements.assignmentBoxesList.innerHTML = '<p class="empty-text">箱を作ると、ここに分割・統合先が表示されます。</p>';
+    return;
+  }
+
+  elements.assignmentBoxesList.innerHTML = state.assignment.boxes
+    .map((box) => {
+      const rows = getAssignmentRowsForKeys(box.rowKeys);
+      const active = box.id === state.assignment.activeBoxId ? ' is-active' : '';
+      const preview = rows
+        .slice(0, 6)
+        .map((row) => row.symbol)
+        .filter(Boolean)
+        .join(', ');
+      return `
+        <article class="assignment-box${active}" data-assignment-box="${escapeHtml(box.id)}">
+          <button type="button" class="assignment-box-main" data-assignment-box-select="${escapeHtml(box.id)}">
+            <strong>${escapeHtml(box.targetDrawingNumber)}</strong>
+            <span>${rows.length}件${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
+          </button>
+          <button type="button" class="assignment-box-delete" data-assignment-box-delete="${escapeHtml(box.id)}">
+            <span class="material-symbols-outlined">close</span>
+          </button>
         </article>
       `;
     })
@@ -1084,6 +1188,7 @@ function renderAll() {
   renderProjectSelects();
   renderDrawingTabs();
   renderAssignmentList();
+  renderAssignmentBoxes();
   renderAssignmentHistory();
   renderRows();
   renderSearchResults();
@@ -1117,6 +1222,8 @@ function resetAssignmentState() {
     filterText: '',
     collapsedGroupKeys: new Set(),
     activeGroupKeys: new Set(),
+    boxes: [],
+    activeBoxId: '',
     history: []
   };
 }
@@ -1250,7 +1357,13 @@ async function loadAssignmentSymbols(options = {}) {
         state.assignment.rows.some((row) => getAssignmentSelectionKey(row) === rowKey)
       )
     );
+    state.assignment.boxes = state.assignment.boxes
+      .map((box) => ({
+        ...box,
+        rowKeys: new Set(Array.from(box.rowKeys || []).filter((rowKey) => state.assignment.rows.some((row) => getAssignmentSelectionKey(row) === rowKey)))
+      }));
     renderAssignmentList();
+    renderAssignmentBoxes();
     renderAssignmentHistory();
     if (!silent) {
       setStatus(`${state.assignment.rows.length}件の登録済み符号を読み込みました。`);
@@ -1324,6 +1437,76 @@ async function moveSelectedAssignmentSymbols() {
   } catch (error) {
     console.error(error);
     const message = `手配書Noの変更に失敗しました: ${error.message}`;
+    setStatus(message);
+    showToast(message, 'error');
+  }
+}
+
+async function applyAssignmentBoxes() {
+  syncProjectFromForm();
+  const boxes = state.assignment.boxes
+    .map((box) => ({
+      ...box,
+      symbolIds: getAssignmentDocIdsForKeys(box.rowKeys)
+    }))
+    .filter((box) => box.targetDrawingNumber && box.symbolIds.length);
+
+  if (!state.project.c2 || !state.project.projectName) {
+    showToast('先に工事を選んでください。', 'error');
+    return;
+  }
+  if (!boxes.length) {
+    showToast('登録する箱がありません。', 'error');
+    return;
+  }
+
+  setBusy('saving', '箱の内容を登録しています。');
+  try {
+    let latestResponse = null;
+    for (const box of boxes) {
+      latestResponse = await assignSymbolsToDrawing({
+        env: state.env,
+        project: state.project,
+        drawing: {
+          drawingNumber: box.targetDrawingNumber,
+          drawingStatus: ''
+        },
+        symbolIds: box.symbolIds,
+        operator: SAVE_ACTOR
+      });
+      state.project = {
+        ...state.project,
+        ...latestResponse.project
+      };
+    }
+
+    if (latestResponse) {
+      state.drawings = latestResponse.drawings || state.drawings;
+      state.selectedDrawingId = latestResponse.drawing.id;
+      state.drawing = {
+        id: latestResponse.drawing.id,
+        drawingNumber: latestResponse.drawing.drawingNumber || '',
+        drawingStatus: latestResponse.drawing.drawingStatus || ''
+      };
+      state.assignment.history = latestResponse.history || state.assignment.history;
+      state.assignment.activeGroupKeys = latestResponse.drawing.id ? new Set([latestResponse.drawing.id]) : state.assignment.activeGroupKeys;
+    }
+
+    state.assignment.boxes = [];
+    state.assignment.activeBoxId = '';
+    state.assignment.selectedDocIds = new Set();
+    state.assignment.targetDrawingNumber = '';
+    renderAll();
+    syncSavedSignature();
+    await refreshProjects();
+    await loadAssignmentSymbols({ silent: true });
+    const movedCount = boxes.reduce((sum, box) => sum + box.symbolIds.length, 0);
+    const message = `${boxes.length}個の箱、${movedCount}件の符号を登録しました。`;
+    setStatus(message);
+    showToast(message, 'success');
+  } catch (error) {
+    console.error(error);
+    const message = `箱の登録に失敗しました: ${error.message}`;
     setStatus(message);
     showToast(message, 'error');
   }
@@ -1580,8 +1763,29 @@ function bindEvents() {
   elements.loadAssignmentButton.addEventListener('click', () => {
     void loadAssignmentSymbols();
   });
-  elements.moveAssignmentButton.addEventListener('click', () => {
-    void moveSelectedAssignmentSymbols();
+  elements.addAssignmentBoxButton?.addEventListener('click', () => {
+    const box = createAssignmentBox(state.assignment.targetDrawingNumber);
+    if (!box) {
+      showToast('箱の手配書Noを入力してください。', 'error');
+      elements.assignmentTargetDrawingInput?.focus();
+      return;
+    }
+    renderAssignmentBoxes();
+  });
+  elements.addSelectionToBoxButton?.addEventListener('click', () => {
+    addRowsToAssignmentBox(state.assignment.selectedDocIds);
+  });
+  elements.addVisibleToBoxButton?.addEventListener('click', () => {
+    addRowsToAssignmentBox(getVisibleAssignmentRows().map(getAssignmentSelectionKey));
+  });
+  elements.applyAssignmentBoxesButton?.addEventListener('click', () => {
+    void applyAssignmentBoxes();
+  });
+  elements.clearAssignmentBoxesButton?.addEventListener('click', () => {
+    state.assignment.boxes = [];
+    state.assignment.activeBoxId = '';
+    renderAssignmentBoxes();
+    renderAssignmentList();
   });
   elements.selectAllAssignmentButton.addEventListener('click', () => {
     state.assignment.selectedDocIds = new Set(getVisibleAssignmentRows().map(getAssignmentSelectionKey));
@@ -1597,6 +1801,25 @@ function bindEvents() {
   });
   elements.assignmentTargetDrawingInput.addEventListener('input', () => {
     state.assignment.targetDrawingNumber = elements.assignmentTargetDrawingInput.value;
+  });
+  elements.assignmentBoxesList?.addEventListener('click', (event) => {
+    const selectButton = event.target.closest('[data-assignment-box-select]');
+    if (selectButton) {
+      const box = state.assignment.boxes.find((item) => item.id === selectButton.dataset.assignmentBoxSelect);
+      if (box) {
+        state.assignment.activeBoxId = box.id;
+        state.assignment.targetDrawingNumber = box.targetDrawingNumber;
+        if (elements.assignmentTargetDrawingInput) {
+          elements.assignmentTargetDrawingInput.value = box.targetDrawingNumber;
+        }
+        renderAssignmentBoxes();
+      }
+      return;
+    }
+    const deleteButton = event.target.closest('[data-assignment-box-delete]');
+    if (deleteButton) {
+      removeAssignmentBox(deleteButton.dataset.assignmentBoxDelete);
+    }
   });
   elements.assignmentSymbolsList.addEventListener('click', (event) => {
     const toggleButton = event.target.closest('[data-assignment-toggle]');

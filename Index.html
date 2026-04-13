@@ -173,12 +173,20 @@
                   <input id="assignmentFilterInput" type="search" placeholder="手配書No / 符号">
                 </label>
                 <label class="inline-field inline-field-compact">
-                  <span>移動先</span>
+                  <span>箱</span>
                   <input id="assignmentTargetDrawingInput" type="text" placeholder="例: 1-1">
                 </label>
-                <button id="moveAssignmentButton" type="button" class="primary-button">
-                  <span class="material-symbols-outlined">drive_file_move</span>
-                  <span>選択を移動</span>
+                <button id="addAssignmentBoxButton" type="button" class="ghost-button">
+                  <span class="material-symbols-outlined">inventory_2</span>
+                  <span>箱を作る</span>
+                </button>
+                <button id="addSelectionToBoxButton" type="button" class="primary-button">
+                  <span class="material-symbols-outlined">move_to_inbox</span>
+                  <span>選択を箱へ</span>
+                </button>
+                <button id="addVisibleToBoxButton" type="button" class="ghost-button">
+                  <span class="material-symbols-outlined">select_check_box</span>
+                  <span>表示中を箱へ</span>
                 </button>
                 <button id="selectAllAssignmentButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">select_all</span>
@@ -189,6 +197,19 @@
                   <span>解除</span>
                 </button>
                 <span id="assignmentSelectedCount" class="count-pill">0件選択</span>
+              </div>
+              <div class="assignment-boxes" id="assignmentBoxesList">
+                <p class="empty-text">箱を作ると、ここに分割・統合先が表示されます。</p>
+              </div>
+              <div class="cluster">
+                <button id="applyAssignmentBoxesButton" type="button" class="primary-button">
+                  <span class="material-symbols-outlined">done_all</span>
+                  <span>箱を登録</span>
+                </button>
+                <button id="clearAssignmentBoxesButton" type="button" class="ghost-button">
+                  <span class="material-symbols-outlined">ink_eraser</span>
+                  <span>箱を空にする</span>
+                </button>
               </div>
               <div id="assignmentSymbolsList" class="assignment-list">
                 <p class="empty-text">登録済みを読込すると、符号をチェックして手配書Noを変更できます。</p>
