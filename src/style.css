@@ -385,6 +385,71 @@ h4 {
   color: rgba(255, 255, 255, 0.82);
 }
 
+.assignment-stepper {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.assignment-step {
+  border: 1px solid var(--panel-border);
+  background: white;
+  border-radius: 18px;
+  padding: 12px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.assignment-step small {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+
+.assignment-step span {
+  font-weight: 800;
+}
+
+.assignment-step.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.16);
+}
+
+.assignment-step.is-active small {
+  background: white;
+}
+
+.assignment-step.is-disabled {
+  opacity: 0.45;
+}
+
+.assignment-step-panel {
+  display: none;
+}
+
+.assignment-step-panel.is-active {
+  display: grid;
+}
+
+.assignment-step-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
 .assignment-editor {
   display: grid;
   gap: 12px;
@@ -459,6 +524,43 @@ h4 {
 .assignment-box-delete:hover {
   color: var(--danger);
   background: #fff1f3;
+}
+
+.assignment-confirm-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.assignment-confirm-card {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 14px;
+  background: white;
+}
+
+.assignment-confirm-card strong {
+  font-size: 1.15rem;
+}
+
+.assignment-confirm-card span {
+  justify-self: start;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+
+.assignment-confirm-card small {
+  color: var(--muted);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .count-pill {
@@ -958,6 +1060,10 @@ h4 {
   .cluster {
     width: 100%;
   }
+
+  .assignment-stepper {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -995,6 +1101,19 @@ h4 {
 
   .assignment-row small {
     grid-column: 2;
+  }
+
+  .assignment-stepper {
+    grid-template-columns: 1fr;
+  }
+
+  .assignment-step-actions > button,
+  .assignment-confirm-card {
+    width: 100%;
+  }
+
+  .assignment-confirm-card {
+    grid-template-columns: 1fr;
   }
 
   .assignment-group-head {

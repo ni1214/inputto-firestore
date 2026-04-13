@@ -10,6 +10,7 @@ const CONTACT_OPTIONS = ['高橋', '髙林', '小島', '佐野'];
 const DISALLOWED_CONTACTS = new Set(['鈴木', '鈴木様']);
 const DEFAULT_MODE = 'register';
 const ASSIGNMENT_ALL_GROUP = '__all__';
+const ASSIGNMENT_STEPS = ['project', 'load', 'boxes', 'symbols', 'confirm'];
 
 const state = {
   env: 'production',
@@ -35,6 +36,7 @@ const state = {
     activeGroupKeys: new Set(),
     boxes: [],
     activeBoxId: '',
+    step: 'project',
     history: []
   },
   search: {
@@ -70,8 +72,11 @@ const elements = {
   drawingStatusInput: document.getElementById('drawingStatusInput'),
   drawingTabs: document.getElementById('drawingTabs'),
   assignmentDrawingTabs: document.getElementById('assignmentDrawingTabs'),
+  assignmentStepButtons: Array.from(document.querySelectorAll('[data-assignment-step]')),
+  assignmentStepPanels: Array.from(document.querySelectorAll('[data-assignment-step-panel]')),
   assignmentSymbolsList: document.getElementById('assignmentSymbolsList'),
   assignmentHistoryList: document.getElementById('assignmentHistoryList'),
+  assignmentConfirmSummary: document.getElementById('assignmentConfirmSummary'),
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
   assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
   assignmentSelectedCount: document.getElementById('assignmentSelectedCount'),
@@ -171,6 +176,44 @@ function setBusy(mode, message) {
 
 function setStatus(message) {
   setBusy('', message);
+}
+
+function canEnterAssignmentStep(step) {
+  if (step === 'project') {
+    return true;
+  }
+  if (!state.project.c2) {
+    return false;
+  }
+  if (step === 'load') {
+    return true;
+  }
+  if (step === 'boxes' || step === 'symbols') {
+    return Boolean(state.assignment.rows.length);
+  }
+  if (step === 'confirm') {
+    return state.assignment.boxes.some((box) => box.rowKeys?.size);
+  }
+  return false;
+}
+
+function setAssignmentStep(step, options = {}) {
+  const nextStep = ASSIGNMENT_STEPS.includes(step) ? step : 'project';
+  if (!canEnterAssignmentStep(nextStep)) {
+    if (!options.silent) {
+      if (!state.project.c2) {
+        showToast('先に工事を選んでください。', 'error');
+      } else if (nextStep === 'boxes' || nextStep === 'symbols') {
+        showToast('先に登録済みを読込してください。', 'error');
+      } else if (nextStep === 'confirm') {
+        showToast('箱に符号を入れてください。', 'error');
+      }
+    }
+    return false;
+  }
+  state.assignment.step = nextStep;
+  renderAssignmentWizard();
+  return true;
 }
 
 function getAiLogicSetupUrl(message) {
@@ -490,6 +533,7 @@ function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = state.assignment.
   state.assignment.selectedDocIds = new Set();
   renderAssignmentBoxes();
   renderAssignmentList();
+  renderAssignmentWizard();
   return true;
 }
 
@@ -504,6 +548,7 @@ function removeAssignmentBox(boxId) {
   }
   renderAssignmentBoxes();
   renderAssignmentList();
+  renderAssignmentWizard();
 }
 
 function renderAssignmentList() {
@@ -668,6 +713,63 @@ function renderAssignmentBoxes() {
       `;
     })
     .join('');
+}
+
+function renderAssignmentConfirmSummary() {
+  if (!elements.assignmentConfirmSummary) {
+    return;
+  }
+  const boxes = state.assignment.boxes
+    .map((box) => ({
+      ...box,
+      rows: getAssignmentRowsForKeys(box.rowKeys || [])
+    }))
+    .filter((box) => box.rows.length);
+
+  if (!boxes.length) {
+    elements.assignmentConfirmSummary.innerHTML = '<p class="empty-text">箱に符号を入れると、ここで登録内容を確認できます。</p>';
+    return;
+  }
+
+  elements.assignmentConfirmSummary.innerHTML = boxes
+    .map((box) => {
+      const preview = box.rows
+        .slice(0, 10)
+        .map((row) => row.symbol || '-')
+        .join(', ');
+      return `
+        <article class="assignment-confirm-card">
+          <strong>${escapeHtml(box.targetDrawingNumber)}</strong>
+          <span>${box.rows.length}件</span>
+          <small>${escapeHtml(preview)}${box.rows.length > 10 ? ' ほか' : ''}</small>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function renderAssignmentWizard() {
+  const requestedStep = ASSIGNMENT_STEPS.includes(state.assignment.step) ? state.assignment.step : 'project';
+  const activeStep = canEnterAssignmentStep(requestedStep) ? requestedStep : state.project.c2 ? 'load' : 'project';
+  state.assignment.step = activeStep;
+
+  elements.assignmentStepButtons.forEach((button) => {
+    const step = button.dataset.assignmentStep;
+    const active = step === activeStep;
+    const available = canEnterAssignmentStep(step);
+    button.classList.toggle('is-active', active);
+    button.classList.toggle('is-disabled', !available);
+    button.setAttribute('aria-current', active ? 'step' : 'false');
+    button.setAttribute('aria-disabled', available ? 'false' : 'true');
+  });
+
+  elements.assignmentStepPanels.forEach((panel) => {
+    const active = panel.dataset.assignmentStepPanel === activeStep;
+    panel.classList.toggle('is-active', active);
+    panel.hidden = !active;
+  });
+
+  renderAssignmentConfirmSummary();
 }
 
 function renderTableHead() {
@@ -1190,6 +1292,7 @@ function renderAll() {
   renderAssignmentList();
   renderAssignmentBoxes();
   renderAssignmentHistory();
+  renderAssignmentWizard();
   renderRows();
   renderSearchResults();
 }
@@ -1224,6 +1327,7 @@ function resetAssignmentState() {
     activeGroupKeys: new Set(),
     boxes: [],
     activeBoxId: '',
+    step: 'project',
     history: []
   };
 }
@@ -1365,6 +1469,10 @@ async function loadAssignmentSymbols(options = {}) {
     renderAssignmentList();
     renderAssignmentBoxes();
     renderAssignmentHistory();
+    if (!silent && rows.length) {
+      state.assignment.step = 'boxes';
+    }
+    renderAssignmentWizard();
     if (!silent) {
       setStatus(`${state.assignment.rows.length}件の登録済み符号を読み込みました。`);
     }
@@ -1496,6 +1604,7 @@ async function applyAssignmentBoxes() {
     state.assignment.activeBoxId = '';
     state.assignment.selectedDocIds = new Set();
     state.assignment.targetDrawingNumber = '';
+    state.assignment.step = 'load';
     renderAll();
     syncSavedSignature();
     await refreshProjects();
@@ -1737,11 +1846,32 @@ function bindEvents() {
     item.addEventListener('click', () => setActiveMode(item.dataset.mode));
   });
 
+  elements.assignmentStepButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      setAssignmentStep(button.dataset.assignmentStep);
+    });
+  });
+
+  document.querySelectorAll('[data-assignment-next]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setAssignmentStep(button.dataset.assignmentNext);
+    });
+  });
+
+  document.querySelectorAll('[data-assignment-prev]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setAssignmentStep(button.dataset.assignmentPrev);
+    });
+  });
+
   elements.projectSelect.addEventListener('change', async () => {
     await selectProject(elements.projectSelect.value);
   });
   elements.assignmentProjectSelect?.addEventListener('change', async () => {
     await selectProject(elements.assignmentProjectSelect.value);
+    if (state.project.c2) {
+      setAssignmentStep('load', { silent: true });
+    }
     renderAssignmentList();
   });
   elements.reportProjectSelect?.addEventListener('change', async () => {
@@ -1771,6 +1901,7 @@ function bindEvents() {
       return;
     }
     renderAssignmentBoxes();
+    renderAssignmentWizard();
   });
   elements.addSelectionToBoxButton?.addEventListener('click', () => {
     addRowsToAssignmentBox(state.assignment.selectedDocIds);
@@ -1786,6 +1917,7 @@ function bindEvents() {
     state.assignment.activeBoxId = '';
     renderAssignmentBoxes();
     renderAssignmentList();
+    renderAssignmentWizard();
   });
   elements.selectAllAssignmentButton.addEventListener('click', () => {
     state.assignment.selectedDocIds = new Set(getVisibleAssignmentRows().map(getAssignmentSelectionKey));
@@ -1813,6 +1945,7 @@ function bindEvents() {
           elements.assignmentTargetDrawingInput.value = box.targetDrawingNumber;
         }
         renderAssignmentBoxes();
+        renderAssignmentWizard();
       }
       return;
     }

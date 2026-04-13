@@ -143,9 +143,32 @@
               </div>
             </div>
 
-            <section class="subpanel stack-lg">
+            <div class="assignment-stepper" id="assignmentStepNav" aria-label="手配書編集の手順">
+              <button type="button" class="assignment-step" data-assignment-step="project">
+                <small>1</small>
+                <span>工事</span>
+              </button>
+              <button type="button" class="assignment-step" data-assignment-step="load">
+                <small>2</small>
+                <span>読込</span>
+              </button>
+              <button type="button" class="assignment-step" data-assignment-step="boxes">
+                <small>3</small>
+                <span>箱</span>
+              </button>
+              <button type="button" class="assignment-step" data-assignment-step="symbols">
+                <small>4</small>
+                <span>符号</span>
+              </button>
+              <button type="button" class="assignment-step" data-assignment-step="confirm">
+                <small>5</small>
+                <span>登録</span>
+              </button>
+            </div>
+
+            <section class="subpanel stack-lg assignment-step-panel" data-assignment-step-panel="project">
               <div class="section-head">
-                <h3>工事</h3>
+                <h3>1. 工事を選ぶ</h3>
               </div>
 
               <label class="field">
@@ -154,11 +177,18 @@
                   <option value="">工事を選択</option>
                 </select>
               </label>
+
+              <div class="assignment-step-actions">
+                <button type="button" class="primary-button" data-assignment-next="load">
+                  <span>次へ</span>
+                  <span class="material-symbols-outlined">arrow_forward</span>
+                </button>
+              </div>
             </section>
 
-            <section class="subpanel stack-lg assignment-editor">
+            <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="load">
               <div class="section-head">
-                <h3>登録済み符号の振り分け</h3>
+                <h3>2. 登録済みを読む</h3>
                 <div class="cluster">
                   <button id="loadAssignmentButton" type="button" class="tonal-button">
                     <span class="material-symbols-outlined">sync</span>
@@ -167,11 +197,25 @@
                 </div>
               </div>
               <div class="drawing-tabs assignment-tabs" id="assignmentDrawingTabs"></div>
+
+              <div class="assignment-step-actions">
+                <button type="button" class="ghost-button" data-assignment-prev="project">
+                  <span class="material-symbols-outlined">arrow_back</span>
+                  <span>戻る</span>
+                </button>
+                <button type="button" class="primary-button" data-assignment-next="boxes">
+                  <span>箱へ</span>
+                  <span class="material-symbols-outlined">arrow_forward</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="boxes">
+              <div class="section-head">
+                <h3>3. 分割・統合する箱を作る</h3>
+              </div>
+
               <div class="assignment-controls">
-                <label class="inline-field inline-field-compact">
-                  <span>検索</span>
-                  <input id="assignmentFilterInput" type="search" placeholder="手配書No / 符号">
-                </label>
                 <label class="inline-field inline-field-compact">
                   <span>箱</span>
                   <input id="assignmentTargetDrawingInput" type="text" placeholder="例: 1-1">
@@ -180,6 +224,34 @@
                   <span class="material-symbols-outlined">inventory_2</span>
                   <span>箱を作る</span>
                 </button>
+              </div>
+
+              <div class="assignment-boxes" id="assignmentBoxesList">
+                <p class="empty-text">箱を作ると、ここに分割・統合先が表示されます。</p>
+              </div>
+
+              <div class="assignment-step-actions">
+                <button type="button" class="ghost-button" data-assignment-prev="load">
+                  <span class="material-symbols-outlined">arrow_back</span>
+                  <span>戻る</span>
+                </button>
+                <button type="button" class="primary-button" data-assignment-next="symbols">
+                  <span>符号を入れる</span>
+                  <span class="material-symbols-outlined">arrow_forward</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="symbols">
+              <div class="section-head">
+                <h3>4. 符号を箱へ入れる</h3>
+              </div>
+
+              <div class="assignment-controls">
+                <label class="inline-field inline-field-compact">
+                  <span>検索</span>
+                  <input id="assignmentFilterInput" type="search" placeholder="手配書No / 符号">
+                </label>
                 <button id="addSelectionToBoxButton" type="button" class="primary-button">
                   <span class="material-symbols-outlined">move_to_inbox</span>
                   <span>選択を箱へ</span>
@@ -198,9 +270,32 @@
                 </button>
                 <span id="assignmentSelectedCount" class="count-pill">0件選択</span>
               </div>
-              <div class="assignment-boxes" id="assignmentBoxesList">
-                <p class="empty-text">箱を作ると、ここに分割・統合先が表示されます。</p>
+
+              <div id="assignmentSymbolsList" class="assignment-list">
+                <p class="empty-text">登録済みを読込すると、符号をチェックして箱へ入れられます。</p>
               </div>
+
+              <div class="assignment-step-actions">
+                <button type="button" class="ghost-button" data-assignment-prev="boxes">
+                  <span class="material-symbols-outlined">arrow_back</span>
+                  <span>戻る</span>
+                </button>
+                <button type="button" class="primary-button" data-assignment-next="confirm">
+                  <span>登録確認へ</span>
+                  <span class="material-symbols-outlined">arrow_forward</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="confirm">
+              <div class="section-head">
+                <h3>5. 箱を登録する</h3>
+              </div>
+
+              <div class="assignment-confirm-summary" id="assignmentConfirmSummary">
+                <p class="empty-text">箱に符号を入れると、ここで登録内容を確認できます。</p>
+              </div>
+
               <div class="cluster">
                 <button id="applyAssignmentBoxesButton" type="button" class="primary-button">
                   <span class="material-symbols-outlined">done_all</span>
@@ -211,14 +306,19 @@
                   <span>箱を空にする</span>
                 </button>
               </div>
-              <div id="assignmentSymbolsList" class="assignment-list">
-                <p class="empty-text">登録済みを読込すると、符号をチェックして手配書Noを変更できます。</p>
-              </div>
+
               <div class="assignment-history">
                 <h4>変更履歴</h4>
                 <div id="assignmentHistoryList" class="assignment-history-list">
                   <p class="empty-text">分割・統合するとここに履歴が残ります。</p>
                 </div>
+              </div>
+
+              <div class="assignment-step-actions">
+                <button type="button" class="ghost-button" data-assignment-prev="symbols">
+                  <span class="material-symbols-outlined">arrow_back</span>
+                  <span>戻る</span>
+                </button>
               </div>
             </section>
           </section>
