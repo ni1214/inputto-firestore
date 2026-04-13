@@ -3,6 +3,7 @@ import { app, firebaseConfig } from './firebase.js';
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_GENERATION_ATTEMPTS = 3;
+const PDF_EXTRACTION_TIMEOUT_MS = 90000;
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 503, 504]);
 const AI_LOGIC_SETUP_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/ailogic/`;
 
@@ -59,6 +60,21 @@ function stripJsonFence(value) {
 
 function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId = null;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  });
 }
 
 function getErrorStatus(error) {
@@ -255,7 +271,7 @@ async function generateWithRetry({ prompt, pdfPart, modelName }) {
   throw toFriendlyError(lastError);
 }
 
-export async function extractHandaiDataFromPdf(file, options = {}) {
+async function extractHandaiDataFromPdfCore(file, options = {}) {
   const model = cleanText(options.model || DEFAULT_GEMINI_MODEL) || DEFAULT_GEMINI_MODEL;
   const prompt = cleanText(options.prompt || buildHandaiExtractionPrompt()) || buildHandaiExtractionPrompt();
   const pdfPart = await fileToInlineDataPart(file);
@@ -266,6 +282,15 @@ export async function extractHandaiDataFromPdf(file, options = {}) {
   } catch (error) {
     throw new Error(`AIの返答を読めませんでした: ${error.message}`);
   }
+}
+
+export async function extractHandaiDataFromPdf(file, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || PDF_EXTRACTION_TIMEOUT_MS);
+  return withTimeout(
+    extractHandaiDataFromPdfCore(file, options),
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : PDF_EXTRACTION_TIMEOUT_MS,
+    'PDF解析が時間内に完了しませんでした。ページを再読み込みして、もう一度試してください。'
+  );
 }
 
 export function getAiLogicSetupUrl() {

@@ -13,6 +13,7 @@ const ASSIGNMENT_ALL_GROUP = '__all__';
 const ASSIGNMENT_STEPS = ['project', 'load', 'boxes', 'symbols', 'confirm'];
 const REPORT_STEPS = ['project', 'drawing', 'symbols', 'inspection', 'labels'];
 const FIRESTORE_LOAD_TIMEOUT_MS = 15000;
+const PDF_RELOAD_WARNING_MS = 120000;
 
 const state = {
   env: 'production',
@@ -21,6 +22,7 @@ const state = {
   loading: false,
   saving: false,
   analyzingPdf: false,
+  pdfAnalysisStartedAt: 0,
   projects: [],
   project: { ...PROJECT_TEMPLATE },
   drawings: [],
@@ -203,6 +205,13 @@ function setBusy(mode, message) {
 
 function setStatus(message) {
   setBusy('', message);
+}
+
+function markAppReady() {
+  window.__inputtoAppReady = true;
+  if (typeof window.__inputtoMarkReady === 'function') {
+    window.__inputtoMarkReady();
+  }
 }
 
 function canEnterAssignmentStep(step) {
@@ -1308,6 +1317,7 @@ function resetAppDropState() {
 
 function setPdfAnalysisBusy(active) {
   state.analyzingPdf = active;
+  state.pdfAnalysisStartedAt = active ? Date.now() : 0;
   document.body.classList.toggle('is-pdf-analyzing', active);
 
   if (!elements.pdfBusyOverlay) {
@@ -2385,6 +2395,9 @@ function bindEvents() {
     if (!state.analyzingPdf) {
       return undefined;
     }
+    if (state.pdfAnalysisStartedAt && Date.now() - state.pdfAnalysisStartedAt > PDF_RELOAD_WARNING_MS) {
+      return undefined;
+    }
     event.preventDefault();
     event.returnValue = '';
     return '';
@@ -2557,6 +2570,7 @@ async function bootstrap() {
   setActiveMode(state.activeMode);
   setStatus('Firestore 版を初期化しました。');
   await refreshProjects();
+  markAppReady();
 }
 
 bootstrap();

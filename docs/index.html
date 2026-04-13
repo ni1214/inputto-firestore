@@ -3,13 +3,99 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Inputto Firestore</title>
+    <script>
+      (() => {
+        const RETRY_KEY = `inputto_load_retry_count:${location.pathname}`;
+        const READY_TIMEOUT_MS = 25000;
+
+        function showRecovery(reason) {
+          const render = () => {
+            if (document.getElementById('loadRecoveryNotice')) {
+              return;
+            }
+            const notice = document.createElement('div');
+            notice.id = 'loadRecoveryNotice';
+            notice.style.cssText = [
+              'position:fixed',
+              'inset:auto 16px 16px 16px',
+              'z-index:9999',
+              'padding:14px 16px',
+              'border:1px solid #d7e1f4',
+              'border-radius:12px',
+              'background:#ffffff',
+              'box-shadow:0 12px 30px rgba(27,37,56,.18)',
+              'font-family:system-ui,sans-serif',
+              'color:#1b2538'
+            ].join(';');
+            notice.innerHTML = [
+              '<strong>読み込みが止まりました</strong>',
+              '<div style="margin-top:6px;color:#64748b">公開直後の古いファイルを読んでいる可能性があります。</div>',
+              '<button type="button" style="margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #d7e1f4;background:#335eea;color:white;cursor:pointer">再読み込み</button>'
+            ].join('');
+            notice.querySelector('button').addEventListener('click', () => {
+              sessionStorage.removeItem(RETRY_KEY);
+              reloadWithCacheBust(reason);
+            });
+            document.body.appendChild(notice);
+          };
+
+          if (document.body) {
+            render();
+          } else {
+            document.addEventListener('DOMContentLoaded', render, { once: true });
+          }
+        }
+
+        function reloadWithCacheBust(reason) {
+          const retryCount = Number(sessionStorage.getItem(RETRY_KEY) || '0');
+          if (retryCount >= 1) {
+            showRecovery(reason);
+            return;
+          }
+          sessionStorage.setItem(RETRY_KEY, String(retryCount + 1));
+          const url = new URL(location.href);
+          url.searchParams.set('reload', Date.now().toString(36));
+          location.replace(url);
+        }
+
+        const readyTimer = window.setTimeout(() => {
+          if (!window.__inputtoAppReady) {
+            reloadWithCacheBust('startup-timeout');
+          }
+        }, READY_TIMEOUT_MS);
+
+        window.__inputtoMarkReady = () => {
+          window.__inputtoAppReady = true;
+          window.clearTimeout(readyTimer);
+          sessionStorage.removeItem(RETRY_KEY);
+        };
+
+        window.addEventListener('error', (event) => {
+          const target = event.target;
+          const assetUrl = target?.src || target?.href || '';
+          if (/\/assets\/index-[^/]+\.(js|css)$/i.test(assetUrl)) {
+            reloadWithCacheBust('asset-load-error');
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', (event) => {
+          const message = String(event.reason?.message || event.reason || '');
+          if (/failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|chunkloaderror|loading chunk \d+ failed/i.test(message)) {
+            reloadWithCacheBust('module-load-error');
+          }
+        });
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
       rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-CaVdAngF.js"></script>
+    <script type="module" crossorigin src="./assets/index-BzvwRqjV.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-BVcaaHuJ.css">
   </head>
   <body>
