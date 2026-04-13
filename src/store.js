@@ -66,6 +66,10 @@ function symbolRef(env, c2, symbolId) {
   return doc(symbolsRef(env, c2), symbolId);
 }
 
+function assignmentHistoryRef(env, c2) {
+  return collection(projectRef(env, c2), 'assignmentHistory');
+}
+
 function sanitizeText(value) {
   return String(value || '').trim();
 }
@@ -403,6 +407,14 @@ export async function loadProjectSymbols(env, c2) {
     });
 }
 
+export async function loadAssignmentHistory(env, c2) {
+  const snapshot = await getDocs(assignmentHistoryRef(env, c2));
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((left, right) => toComparableDate(right.createdAt) - toComparableDate(left.createdAt))
+    .slice(0, 30);
+}
+
 export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds, operator }) {
   const cleanProject = await saveProjectHeader(env, project, operator);
   const cleanDrawing = sanitizeDrawing(drawing);
@@ -470,10 +482,43 @@ export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds,
     });
   });
 
+  const sourceDrawings = Array.from(
+    selectedEntries.reduce((map, entry) => {
+      const key = sanitizeText(entry.drawingId) || '__unassigned';
+      const current = map.get(key) || {
+        drawingId: sanitizeText(entry.drawingId),
+        drawingNumber: sanitizeText(entry.drawingNumber) || '未割当',
+        count: 0
+      };
+      current.count += 1;
+      map.set(key, current);
+      return map;
+    }, new Map()).values()
+  );
+
+  writes.push((batch) => {
+    batch.set(doc(assignmentHistoryRef(env, cleanProject.c2)), {
+      action: sourceDrawings.length > 1 ? 'merge' : 'move',
+      c2: cleanProject.c2,
+      projectName: cleanProject.projectName,
+      sourceDrawings,
+      targetDrawing: {
+        drawingId,
+        drawingNumber: cleanDrawing.drawingNumber
+      },
+      symbolCount: selectedEntries.length,
+      symbolPreview: selectedEntries.slice(0, SYMBOL_PREVIEW_LIMIT).map((row) => sanitizeText(row.symbol)),
+      createdAt: serverTimestamp(),
+      createdBy: sanitizeText(operator)
+    });
+  });
+
   await commitChunked(writes);
 
   const summary = await recalculateProjectSummaries(env, cleanProject.c2, operator);
   const rowsSnapshot = await getDocs(query(symbolsRef(env, cleanProject.c2), where('drawingId', '==', drawingId)));
+
+  const history = await loadAssignmentHistory(env, cleanProject.c2);
 
   return {
     project: {
@@ -487,6 +532,7 @@ export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds,
       drawingStatus
     },
     drawings: summary.drawings,
+    history,
     rows: rowsSnapshot.docs
       .map((item) => ({
         uiId: crypto.randomUUID(),

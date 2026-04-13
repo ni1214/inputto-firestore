@@ -437,15 +437,14 @@ h4 {
   background: #f3f7ff;
 }
 
-.assignment-group-select {
+.assignment-group-title {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  cursor: pointer;
 }
 
-.assignment-group-select small {
+.assignment-group-title small {
   color: var(--muted);
   font-weight: 700;
 }
@@ -489,6 +488,35 @@ h4 {
 }
 
 .assignment-row small {
+  color: var(--muted);
+}
+
+.assignment-history {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.assignment-history h4 {
+  margin: 0;
+}
+
+.assignment-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.assignment-history-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.assignment-history-item span,
+.assignment-history-item small {
   color: var(--muted);
 }
 

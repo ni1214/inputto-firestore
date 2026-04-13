@@ -1,6 +1,6 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
-import { assignSymbolsToDrawing, listProjects, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
+import { assignSymbolsToDrawing, listProjects, loadAssignmentHistory, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
 import { extractHandaiDataFromPdf } from './gemini.js';
 
 const SAVE_ACTOR = 'system';
@@ -32,7 +32,8 @@ const state = {
     targetDrawingNumber: '',
     filterText: '',
     collapsedGroupKeys: new Set(),
-    activeGroupKey: ''
+    activeGroupKeys: new Set(),
+    history: []
   },
   search: {
     projectC2: '',
@@ -68,6 +69,7 @@ const elements = {
   drawingTabs: document.getElementById('drawingTabs'),
   assignmentDrawingTabs: document.getElementById('assignmentDrawingTabs'),
   assignmentSymbolsList: document.getElementById('assignmentSymbolsList'),
+  assignmentHistoryList: document.getElementById('assignmentHistoryList'),
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
   assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
   assignmentSelectedCount: document.getElementById('assignmentSelectedCount'),
@@ -338,8 +340,8 @@ function renderDrawingTabs() {
     return;
   }
 
-  const activeGroupKey = getActiveAssignmentGroupKey();
-  const allActive = activeGroupKey === ASSIGNMENT_ALL_GROUP ? ' is-active' : '';
+  const activeGroupKeys = getActiveAssignmentGroupKeys();
+  const allActive = state.drawings.length > 0 && state.drawings.every((drawing) => activeGroupKeys.has(drawing.id)) ? ' is-active' : '';
   const tabs = [
     `
       <button type="button" class="drawing-chip${allActive}" data-assignment-tab="${ASSIGNMENT_ALL_GROUP}">
@@ -348,7 +350,7 @@ function renderDrawingTabs() {
       </button>
     `,
     ...state.drawings.map((drawing) => {
-      const active = drawing.id === activeGroupKey ? ' is-active' : '';
+      const active = activeGroupKeys.has(drawing.id) ? ' is-active' : '';
       return `
         <button type="button" class="drawing-chip${active}" data-assignment-tab="${escapeHtml(drawing.id)}">
           <span>${escapeHtml(drawing.drawingNumber || '-')}</span>
@@ -378,19 +380,21 @@ function getAssignmentGroups() {
   );
 }
 
-function getActiveAssignmentGroupKey(groups = null) {
-  if (state.assignment.activeGroupKey === ASSIGNMENT_ALL_GROUP) {
-    return ASSIGNMENT_ALL_GROUP;
-  }
+function getActiveAssignmentGroupKeys(groups = null) {
   const sourceGroups = groups || getAssignmentGroups();
-  const activeExists = sourceGroups.some((group) => group.key === state.assignment.activeGroupKey);
-  if (activeExists) {
-    return state.assignment.activeGroupKey;
+  const validKeys = new Set(sourceGroups.map((group) => group.key));
+  const nextKeys = new Set(Array.from(state.assignment.activeGroupKeys || []).filter((key) => validKeys.has(key)));
+
+  if (nextKeys.size) {
+    state.assignment.activeGroupKeys = nextKeys;
+    return nextKeys;
   }
+
   const firstDrawingId = state.drawings[0]?.id || '';
   const firstDrawingExists = sourceGroups.some((group) => group.key === firstDrawingId);
-  state.assignment.activeGroupKey = firstDrawingExists ? firstDrawingId : sourceGroups[0]?.key || firstDrawingId || '';
-  return state.assignment.activeGroupKey;
+  const fallbackKey = firstDrawingExists ? firstDrawingId : sourceGroups[0]?.key || firstDrawingId || '';
+  state.assignment.activeGroupKeys = fallbackKey ? new Set([fallbackKey]) : new Set();
+  return state.assignment.activeGroupKeys;
 }
 
 function assignmentRowMatches(row) {
@@ -403,10 +407,10 @@ function assignmentRowMatches(row) {
 
 function getVisibleAssignmentRows() {
   const groups = getAssignmentGroups();
-  const activeGroupKey = getActiveAssignmentGroupKey(groups);
+  const activeGroupKeys = getActiveAssignmentGroupKeys(groups);
   return state.assignment.rows.filter((row) => {
     const key = row.drawingId || '__unassigned';
-    return (activeGroupKey === ASSIGNMENT_ALL_GROUP || key === activeGroupKey) && assignmentRowMatches(row);
+    return activeGroupKeys.has(key) && assignmentRowMatches(row);
   });
 }
 
@@ -437,10 +441,10 @@ function renderAssignmentList() {
 
   const filtering = Boolean(normalizeText(state.assignment.filterText));
   const allGroups = getAssignmentGroups();
-  const activeGroupKey = getActiveAssignmentGroupKey(allGroups);
+  const activeGroupKeys = getActiveAssignmentGroupKeys(allGroups);
   renderDrawingTabs();
   const groups = allGroups
-    .filter((group) => activeGroupKey === ASSIGNMENT_ALL_GROUP || group.key === activeGroupKey)
+    .filter((group) => activeGroupKeys.has(group.key))
     .map((group) => ({
       ...group,
       totalRows: group.rows.length,
@@ -455,7 +459,6 @@ function renderAssignmentList() {
 
   elements.assignmentSymbolsList.innerHTML = groups
     .map((group) => {
-      const allSelected = group.rows.every((row) => state.assignment.selectedDocIds.has(row.docId));
       const collapsed = !filtering && state.assignment.collapsedGroupKeys.has(group.key);
       const rows = group.rows
         .map((row) => {
@@ -474,11 +477,10 @@ function renderAssignmentList() {
       return `
         <article class="assignment-group${collapsed ? ' is-collapsed' : ''}">
           <div class="assignment-group-head">
-            <label class="assignment-group-select">
-              <input type="checkbox" data-assignment-group="${escapeHtml(group.key)}"${allSelected ? ' checked' : ''}>
+            <div class="assignment-group-title">
               <strong>${escapeHtml(group.drawingNumber)}</strong>
               <small>${filtering ? `${group.rows.length}/${group.totalRows}件` : `${group.rows.length}件`}</small>
-            </label>
+            </div>
             <button
               type="button"
               class="assignment-toggle"
@@ -489,6 +491,52 @@ function renderAssignmentList() {
             </button>
           </div>
           <div class="assignment-group-rows"${collapsed ? ' hidden' : ''}>${rows}</div>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function formatHistoryDate(value) {
+  if (!value) {
+    return '';
+  }
+  const date = value.seconds ? new Date(value.seconds * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleString('ja-JP', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function renderAssignmentHistory() {
+  if (!elements.assignmentHistoryList) {
+    return;
+  }
+  const history = state.assignment.history || [];
+  if (!history.length) {
+    elements.assignmentHistoryList.innerHTML = '<p class="empty-text">分割・統合するとここに履歴が残ります。</p>';
+    return;
+  }
+
+  elements.assignmentHistoryList.innerHTML = history
+    .slice(0, 10)
+    .map((item) => {
+      const sources = (item.sourceDrawings || [])
+        .map((source) => `${source.drawingNumber || '-'} ${source.count || 0}件`)
+        .join(' + ');
+      const target = item.targetDrawing?.drawingNumber || '-';
+      const preview = (item.symbolPreview || []).filter(Boolean).join(', ');
+      const action = (item.sourceDrawings || []).length > 1 ? '統合' : '分割/移動';
+      return `
+        <article class="assignment-history-item">
+          <strong>${escapeHtml(action)}: ${escapeHtml(sources)} → ${escapeHtml(target)}</strong>
+          <span>${escapeHtml(String(item.symbolCount || 0))}件${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
+          <small>${escapeHtml(formatHistoryDate(item.createdAt))}</small>
         </article>
       `;
     })
@@ -1013,6 +1061,7 @@ function renderAll() {
   renderProjectSelects();
   renderDrawingTabs();
   renderAssignmentList();
+  renderAssignmentHistory();
   renderRows();
   renderSearchResults();
 }
@@ -1044,7 +1093,8 @@ function resetAssignmentState() {
     targetDrawingNumber: '',
     filterText: '',
     collapsedGroupKeys: new Set(),
-    activeGroupKey: ''
+    activeGroupKeys: new Set(),
+    history: []
   };
 }
 
@@ -1165,14 +1215,20 @@ async function loadAssignmentSymbols(options = {}) {
     setBusy('loading', '登録済み符号を読み込んでいます。');
   }
   try {
-    state.assignment.rows = await loadProjectSymbols(state.env, state.project.c2);
-    getActiveAssignmentGroupKey(getAssignmentGroups());
+    const [rows, history] = await Promise.all([
+      loadProjectSymbols(state.env, state.project.c2),
+      loadAssignmentHistory(state.env, state.project.c2)
+    ]);
+    state.assignment.rows = rows;
+    state.assignment.history = history;
+    getActiveAssignmentGroupKeys(getAssignmentGroups());
     state.assignment.selectedDocIds = new Set(
       Array.from(state.assignment.selectedDocIds).filter((docId) =>
         state.assignment.rows.some((row) => row.docId === docId)
       )
     );
     renderAssignmentList();
+    renderAssignmentHistory();
     if (!silent) {
       setStatus(`${state.assignment.rows.length}件の登録済み符号を読み込みました。`);
     }
@@ -1232,7 +1288,8 @@ async function moveSelectedAssignmentSymbols() {
     state.selectedRowIds = new Set();
     state.assignment.selectedDocIds = new Set();
     state.assignment.targetDrawingNumber = '';
-    state.assignment.activeGroupKey = response.drawing.id || state.assignment.activeGroupKey;
+    state.assignment.activeGroupKeys = response.drawing.id ? new Set([response.drawing.id]) : state.assignment.activeGroupKeys;
+    state.assignment.history = response.history || state.assignment.history;
     syncBulkSymbolsInput(state.rows);
     renderAll();
     syncSavedSignature();
@@ -1536,7 +1593,17 @@ function bindEvents() {
     if (!tab) {
       return;
     }
-    state.assignment.activeGroupKey = tab.dataset.assignmentTab || '';
+    const key = tab.dataset.assignmentTab || '';
+    if (key === ASSIGNMENT_ALL_GROUP) {
+      state.assignment.activeGroupKeys = new Set(state.drawings.map((drawing) => drawing.id).filter(Boolean));
+    } else if (state.assignment.activeGroupKeys.has(key)) {
+      state.assignment.activeGroupKeys.delete(key);
+      if (!state.assignment.activeGroupKeys.size) {
+        state.assignment.activeGroupKeys.add(key);
+      }
+    } else {
+      state.assignment.activeGroupKeys.add(key);
+    }
     state.assignment.selectedDocIds = new Set();
     state.assignment.collapsedGroupKeys = new Set();
     renderDrawingTabs();
