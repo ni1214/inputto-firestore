@@ -9,6 +9,7 @@ const MODE_STORAGE_KEY = 'inputto_active_mode';
 const CONTACT_OPTIONS = ['高橋', '髙林', '小島', '佐野'];
 const DISALLOWED_CONTACTS = new Set(['鈴木', '鈴木様']);
 const DEFAULT_MODE = 'register';
+const ASSIGNMENT_ALL_GROUP = '__all__';
 
 const state = {
   env: 'production',
@@ -30,7 +31,8 @@ const state = {
     selectedDocIds: new Set(),
     targetDrawingNumber: '',
     filterText: '',
-    collapsedGroupKeys: new Set()
+    collapsedGroupKeys: new Set(),
+    activeGroupKey: ''
   },
   search: {
     projectC2: '',
@@ -301,14 +303,13 @@ function renderProjectSelects() {
 }
 
 function renderDrawingTabs() {
-  const tabContainers = [elements.drawingTabs, elements.assignmentDrawingTabs].filter(Boolean);
-  let html = '';
+  let reportHtml = '';
   if (!state.project.c2) {
-    html = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
+    reportHtml = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
   } else if (!state.drawings.length) {
-    html = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
+    reportHtml = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
   } else {
-    html = state.drawings
+    reportHtml = state.drawings
       .map((drawing) => {
         const active = drawing.id === state.selectedDrawingId ? ' is-active' : '';
         return `
@@ -320,9 +321,43 @@ function renderDrawingTabs() {
       })
       .join('');
   }
-  tabContainers.forEach((container) => {
-    container.innerHTML = html;
-  });
+
+  if (elements.drawingTabs) {
+    elements.drawingTabs.innerHTML = reportHtml;
+  }
+
+  if (!elements.assignmentDrawingTabs) {
+    return;
+  }
+  if (!state.project.c2) {
+    elements.assignmentDrawingTabs.innerHTML = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
+    return;
+  }
+  if (!state.drawings.length) {
+    elements.assignmentDrawingTabs.innerHTML = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
+    return;
+  }
+
+  const activeGroupKey = getActiveAssignmentGroupKey();
+  const allActive = activeGroupKey === ASSIGNMENT_ALL_GROUP ? ' is-active' : '';
+  const tabs = [
+    `
+      <button type="button" class="drawing-chip${allActive}" data-assignment-tab="${ASSIGNMENT_ALL_GROUP}">
+        <span>全て</span>
+        <small>${state.drawings.reduce((sum, drawing) => sum + Number(drawing.rowCount || 0), 0)}件</small>
+      </button>
+    `,
+    ...state.drawings.map((drawing) => {
+      const active = drawing.id === activeGroupKey ? ' is-active' : '';
+      return `
+        <button type="button" class="drawing-chip${active}" data-assignment-tab="${escapeHtml(drawing.id)}">
+          <span>${escapeHtml(drawing.drawingNumber || '-')}</span>
+          <small>${escapeHtml(String(drawing.rowCount || 0))}件</small>
+        </button>
+      `;
+    })
+  ];
+  elements.assignmentDrawingTabs.innerHTML = tabs.join('');
 }
 
 function getAssignmentGroups() {
@@ -343,6 +378,21 @@ function getAssignmentGroups() {
   );
 }
 
+function getActiveAssignmentGroupKey(groups = null) {
+  if (state.assignment.activeGroupKey === ASSIGNMENT_ALL_GROUP) {
+    return ASSIGNMENT_ALL_GROUP;
+  }
+  const sourceGroups = groups || getAssignmentGroups();
+  const activeExists = sourceGroups.some((group) => group.key === state.assignment.activeGroupKey);
+  if (activeExists) {
+    return state.assignment.activeGroupKey;
+  }
+  const firstDrawingId = state.drawings[0]?.id || '';
+  const firstDrawingExists = sourceGroups.some((group) => group.key === firstDrawingId);
+  state.assignment.activeGroupKey = firstDrawingExists ? firstDrawingId : sourceGroups[0]?.key || firstDrawingId || '';
+  return state.assignment.activeGroupKey;
+}
+
 function assignmentRowMatches(row) {
   const term = normalizeText(state.assignment.filterText);
   if (!term) {
@@ -352,7 +402,12 @@ function assignmentRowMatches(row) {
 }
 
 function getVisibleAssignmentRows() {
-  return state.assignment.rows.filter(assignmentRowMatches);
+  const groups = getAssignmentGroups();
+  const activeGroupKey = getActiveAssignmentGroupKey(groups);
+  return state.assignment.rows.filter((row) => {
+    const key = row.drawingId || '__unassigned';
+    return (activeGroupKey === ASSIGNMENT_ALL_GROUP || key === activeGroupKey) && assignmentRowMatches(row);
+  });
 }
 
 function renderAssignmentList() {
@@ -381,7 +436,11 @@ function renderAssignmentList() {
   }
 
   const filtering = Boolean(normalizeText(state.assignment.filterText));
-  const groups = getAssignmentGroups()
+  const allGroups = getAssignmentGroups();
+  const activeGroupKey = getActiveAssignmentGroupKey(allGroups);
+  renderDrawingTabs();
+  const groups = allGroups
+    .filter((group) => activeGroupKey === ASSIGNMENT_ALL_GROUP || group.key === activeGroupKey)
     .map((group) => ({
       ...group,
       totalRows: group.rows.length,
@@ -984,7 +1043,8 @@ function resetAssignmentState() {
     selectedDocIds: new Set(),
     targetDrawingNumber: '',
     filterText: '',
-    collapsedGroupKeys: new Set()
+    collapsedGroupKeys: new Set(),
+    activeGroupKey: ''
   };
 }
 
@@ -1106,6 +1166,7 @@ async function loadAssignmentSymbols(options = {}) {
   }
   try {
     state.assignment.rows = await loadProjectSymbols(state.env, state.project.c2);
+    getActiveAssignmentGroupKey(getAssignmentGroups());
     state.assignment.selectedDocIds = new Set(
       Array.from(state.assignment.selectedDocIds).filter((docId) =>
         state.assignment.rows.some((row) => row.docId === docId)
@@ -1171,6 +1232,7 @@ async function moveSelectedAssignmentSymbols() {
     state.selectedRowIds = new Set();
     state.assignment.selectedDocIds = new Set();
     state.assignment.targetDrawingNumber = '';
+    state.assignment.activeGroupKey = response.drawing.id || state.assignment.activeGroupKey;
     syncBulkSymbolsInput(state.rows);
     renderAll();
     syncSavedSignature();
@@ -1469,6 +1531,17 @@ function bindEvents() {
     }
     renderAssignmentList();
   });
+  elements.assignmentDrawingTabs?.addEventListener('click', (event) => {
+    const tab = event.target.closest('[data-assignment-tab]');
+    if (!tab) {
+      return;
+    }
+    state.assignment.activeGroupKey = tab.dataset.assignmentTab || '';
+    state.assignment.selectedDocIds = new Set();
+    state.assignment.collapsedGroupKeys = new Set();
+    renderDrawingTabs();
+    renderAssignmentList();
+  });
   elements.assignmentSymbolsList.addEventListener('change', (event) => {
     const symbolCheckbox = event.target.closest('[data-assignment-symbol]');
     if (symbolCheckbox) {
@@ -1554,7 +1627,6 @@ function bindEvents() {
     await loadCurrentDrawing();
   };
   elements.drawingTabs.addEventListener('click', handleDrawingTabClick);
-  elements.assignmentDrawingTabs?.addEventListener('click', handleDrawingTabClick);
 
   elements.tableBody.addEventListener('input', (event) => {
     const input = event.target.closest('[data-row-id][data-field-key]');
