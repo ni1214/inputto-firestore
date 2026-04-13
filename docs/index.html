@@ -9,8 +9,8 @@
     <link
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
       rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-i1aMr6ck.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-cj5zobiG.css">
+    <script type="module" crossorigin src="./assets/index-CaVdAngF.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BVcaaHuJ.css">
   </head>
   <body>
     <div class="app-shell" id="appShell">
@@ -394,7 +394,7 @@
         </section>
 
         <section class="mode-panel" data-mode-panel="report">
-          <section class="panel stack-lg">
+          <section class="panel stack-lg assignment-workflow report-workflow">
             <div class="mode-header">
               <h2>検査表 / ラベル</h2>
               <div class="cluster">
@@ -405,17 +405,27 @@
               </div>
             </div>
 
-            <div class="report-edit-block report-settings">
-              <label class="field report-contact-field">
-                <span>担当</span>
-                <select id="projectContactInput">
-                  <option value="">担当を選択</option>
-                  <option value="高橋">高橋</option>
-                  <option value="髙林">髙林</option>
-                  <option value="小島">小島</option>
-                  <option value="佐野">佐野</option>
-                </select>
-              </label>
+            <div class="assignment-stepper report-stepper" id="reportStepNav" aria-label="検査表 / ラベルの手順">
+              <button type="button" class="assignment-step" data-report-step="project">
+                <small>1</small>
+                <span>工事</span>
+              </button>
+              <button type="button" class="assignment-step" data-report-step="drawing">
+                <small>2</small>
+                <span>手配書</span>
+              </button>
+              <button type="button" class="assignment-step" data-report-step="symbols">
+                <small>3</small>
+                <span>符号データ</span>
+              </button>
+              <button type="button" class="assignment-step" data-report-step="inspection">
+                <small>4</small>
+                <span>検査表</span>
+              </button>
+              <button type="button" class="assignment-step" data-report-step="labels">
+                <small>5</small>
+                <span>ラベル</span>
+              </button>
             </div>
 
             <div class="summary-grid">
@@ -437,94 +447,159 @@
               </div>
             </div>
 
-            <section class="subpanel stack-lg">
-              <div class="section-head">
-                <h3>工事</h3>
-              </div>
+            <div class="assignment-stage report-stage" id="reportStage">
+              <section class="subpanel stack-lg assignment-step-panel" data-report-step-panel="project">
+                <div class="section-head">
+                  <h3>1. 工事と担当を選ぶ</h3>
+                </div>
 
-              <label class="field">
-                <span>候補</span>
-                <select id="reportProjectSelect">
-                  <option value="">工事を選択</option>
-                </select>
-              </label>
-            </section>
-
-            <section class="subpanel stack-lg">
-              <div class="section-head">
-                <h3>手配書タブ</h3>
-              </div>
-              <div class="drawing-tabs" id="drawingTabs"></div>
-            </section>
-
-            <section class="subpanel stack-lg">
-              <div class="section-head">
-                <h3>符号データ</h3>
-                <div class="cluster">
-                  <label class="inline-field inline-field-compact">
-                    <span>絞込</span>
-                    <input id="filterInput" type="text" placeholder="符号 / 品名 / フロア">
+                <div class="grid-2 report-edit-block">
+                  <label class="field">
+                    <span>候補</span>
+                    <select id="reportProjectSelect">
+                      <option value="">工事を選択</option>
+                    </select>
                   </label>
-                  <button id="addRowButton" type="button" class="ghost-button">
-                    <span class="material-symbols-outlined">add_row_below</span>
-                    <span>行追加</span>
-                  </button>
-                  <button id="duplicateRowButton" type="button" class="ghost-button">
-                    <span class="material-symbols-outlined">content_copy</span>
-                    <span>複製</span>
-                  </button>
-                  <button id="deleteRowsButton" type="button" class="danger-button">
-                    <span class="material-symbols-outlined">delete</span>
-                    <span>選択削除</span>
+                  <label class="field">
+                    <span>担当</span>
+                    <select id="projectContactInput">
+                      <option value="">担当を選択</option>
+                      <option value="高橋">高橋</option>
+                      <option value="髙林">髙林</option>
+                      <option value="小島">小島</option>
+                      <option value="佐野">佐野</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="assignment-step-actions">
+                  <button type="button" class="primary-button" data-report-next="drawing">
+                    <span>手配書へ</span>
+                    <span class="material-symbols-outlined">arrow_forward</span>
                   </button>
                 </div>
-              </div>
+              </section>
 
-              <div class="table-wrap">
-                <table class="data-table">
-                  <thead id="tableHead"></thead>
-                  <tbody id="tableBody"></tbody>
-                </table>
-              </div>
-            </section>
+              <section class="subpanel stack-lg assignment-step-panel" data-report-step-panel="drawing">
+                <div class="section-head">
+                  <h3>2. 手配書を選ぶ</h3>
+                </div>
+                <div class="drawing-tabs" id="drawingTabs"></div>
 
-            <div class="form-actions">
-              <button id="reportRegisterButton" type="button" class="primary-button">
-                <span class="material-symbols-outlined">app_registration</span>
-                <span>登録</span>
-              </button>
+                <div class="assignment-step-actions">
+                  <button type="button" class="ghost-button" data-report-prev="project">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                    <span>戻る</span>
+                  </button>
+                  <button type="button" class="primary-button" data-report-next="symbols">
+                    <span>符号データへ</span>
+                    <span class="material-symbols-outlined">arrow_forward</span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-report-step-panel="symbols">
+                <div class="section-head">
+                  <h3>3. 符号データを整える</h3>
+                  <div class="cluster">
+                    <label class="inline-field inline-field-compact">
+                      <span>絞込</span>
+                      <input id="filterInput" type="text" placeholder="符号 / 品名 / フロア">
+                    </label>
+                    <button id="addRowButton" type="button" class="ghost-button">
+                      <span class="material-symbols-outlined">add_row_below</span>
+                      <span>行追加</span>
+                    </button>
+                    <button id="duplicateRowButton" type="button" class="ghost-button">
+                      <span class="material-symbols-outlined">content_copy</span>
+                      <span>複製</span>
+                    </button>
+                    <button id="deleteRowsButton" type="button" class="danger-button">
+                      <span class="material-symbols-outlined">delete</span>
+                      <span>選択削除</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="table-wrap">
+                  <table class="data-table">
+                    <thead id="tableHead"></thead>
+                    <tbody id="tableBody"></tbody>
+                  </table>
+                </div>
+
+                <div class="form-actions">
+                  <button id="reportRegisterButton" type="button" class="primary-button">
+                    <span class="material-symbols-outlined">app_registration</span>
+                    <span>登録</span>
+                  </button>
+                </div>
+
+                <div class="assignment-step-actions">
+                  <button type="button" class="ghost-button" data-report-prev="drawing">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                    <span>戻る</span>
+                  </button>
+                  <button type="button" class="primary-button" data-report-next="inspection">
+                    <span>検査表へ</span>
+                    <span class="material-symbols-outlined">arrow_forward</span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="subpanel stack-lg assignment-step-panel report-output-panel" data-report-step-panel="inspection">
+                <div class="section-head">
+                  <h3>4. 検査表を確認する</h3>
+                </div>
+
+                <div class="table-wrap">
+                  <table class="data-table search-table">
+                    <thead>
+                      <tr>
+                        <th>手配書No</th>
+                        <th>符号</th>
+                        <th>品名</th>
+                        <th>フロア</th>
+                        <th>内外</th>
+                        <th>ラベル枚数</th>
+                        <th>焼付色</th>
+                        <th>担当</th>
+                      </tr>
+                    </thead>
+                    <tbody id="inspectionTableBody"></tbody>
+                  </table>
+                </div>
+
+                <div class="assignment-step-actions">
+                  <button type="button" class="ghost-button" data-report-prev="symbols">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                    <span>戻る</span>
+                  </button>
+                  <button type="button" class="primary-button" data-report-next="labels">
+                    <span>ラベルへ</span>
+                    <span class="material-symbols-outlined">arrow_forward</span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="subpanel stack-lg assignment-step-panel report-output-panel" data-report-step-panel="labels">
+                <div class="section-head">
+                  <h3>5. ラベルを確認する</h3>
+                </div>
+                <div class="label-pages" id="labelPages"></div>
+
+                <div class="assignment-step-actions">
+                  <button type="button" class="ghost-button" data-report-prev="inspection">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                    <span>戻る</span>
+                  </button>
+                  <button type="button" class="primary-button" data-report-print>
+                    <span class="material-symbols-outlined">print</span>
+                    <span>印刷</span>
+                  </button>
+                </div>
+              </section>
             </div>
-
-            <section class="subpanel stack-lg">
-              <div class="section-head">
-                <h3>検査表</h3>
-              </div>
-
-              <div class="table-wrap">
-                <table class="data-table search-table">
-                  <thead>
-                    <tr>
-                      <th>手配書No</th>
-                      <th>符号</th>
-                      <th>品名</th>
-                      <th>フロア</th>
-                      <th>内外</th>
-                      <th>ラベル枚数</th>
-                      <th>焼付色</th>
-                      <th>担当</th>
-                    </tr>
-                  </thead>
-                  <tbody id="inspectionTableBody"></tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="subpanel stack-lg">
-              <div class="section-head">
-                <h3>ラベル</h3>
-              </div>
-              <div class="label-pages" id="labelPages"></div>
-            </section>
           </section>
         </section>
       </div>

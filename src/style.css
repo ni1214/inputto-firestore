@@ -438,6 +438,10 @@ h4 {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.report-workflow {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
 .assignment-stepper {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1281,6 +1285,19 @@ h4 {
   .compact-button,
   .report-edit-block {
     display: none !important;
+  }
+
+  .report-stepper,
+  .report-workflow > .summary-grid,
+  [data-report-step-panel="project"],
+  [data-report-step-panel="drawing"],
+  [data-report-step-panel="symbols"] {
+    display: none !important;
+  }
+
+  [data-report-step-panel="inspection"],
+  [data-report-step-panel="labels"] {
+    display: grid !important;
   }
 
   .app-shell {

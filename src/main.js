@@ -11,6 +11,7 @@ const DISALLOWED_CONTACTS = new Set(['鈴木', '鈴木様']);
 const DEFAULT_MODE = 'register';
 const ASSIGNMENT_ALL_GROUP = '__all__';
 const ASSIGNMENT_STEPS = ['project', 'load', 'boxes', 'symbols', 'confirm'];
+const REPORT_STEPS = ['project', 'drawing', 'symbols', 'inspection', 'labels'];
 const FIRESTORE_LOAD_TIMEOUT_MS = 15000;
 
 const state = {
@@ -39,6 +40,9 @@ const state = {
     activeBoxId: '',
     step: 'project',
     history: []
+  },
+  report: {
+    step: 'project'
   },
   search: {
     projectC2: '',
@@ -119,6 +123,9 @@ const elements = {
   summaryDrawing: document.getElementById('summaryDrawing'),
   summaryRows: document.getElementById('summaryRows'),
   summaryLabels: document.getElementById('summaryLabels'),
+  reportStage: document.getElementById('reportStage'),
+  reportStepButtons: Array.from(document.querySelectorAll('[data-report-step]')),
+  reportStepPanels: Array.from(document.querySelectorAll('[data-report-step-panel]')),
   inspectionTableBody: document.getElementById('inspectionTableBody'),
   labelPages: document.getElementById('labelPages'),
   reportRegisterButton: document.getElementById('reportRegisterButton'),
@@ -253,6 +260,58 @@ async function navigateAssignmentStep(step) {
   }
 }
 
+function getReportFallbackStep() {
+  if (!state.project.c2) {
+    return 'project';
+  }
+  if (!state.drawing.drawingNumber) {
+    return 'drawing';
+  }
+  return 'symbols';
+}
+
+function canEnterReportStep(step) {
+  if (step === 'project') {
+    return true;
+  }
+  if (!state.project.c2) {
+    return false;
+  }
+  if (step === 'drawing') {
+    return true;
+  }
+  if (step === 'symbols' || step === 'inspection' || step === 'labels') {
+    return Boolean(state.drawing.drawingNumber);
+  }
+  return false;
+}
+
+function setReportStep(step, options = {}) {
+  const nextStep = REPORT_STEPS.includes(step) ? step : 'project';
+  if (!canEnterReportStep(nextStep)) {
+    if (!options.silent) {
+      if (!state.project.c2) {
+        showToast('先に工事を選んでください。', 'error');
+      } else {
+        showToast('先に手配書タブを選んでください。', 'error');
+      }
+    }
+    return false;
+  }
+
+  const stepChanged = state.report.step !== nextStep;
+  state.report.step = nextStep;
+  renderReportWizard();
+  if (stepChanged && elements.reportStage) {
+    elements.reportStage.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  return true;
+}
+
+function navigateReportStep(step) {
+  setReportStep(step);
+}
+
 function getAiLogicSetupUrl(message) {
   const matched = String(message || '').match(/https:\/\/console\.firebase\.google\.com\/project\/[^\s]+\/ailogic\/?/);
   return matched ? matched[0] : '';
@@ -290,6 +349,9 @@ function setActiveMode(mode) {
   state.activeMode = normalizeMode(mode);
   localStorage.setItem(MODE_STORAGE_KEY, state.activeMode);
   renderChrome();
+  if (state.activeMode === 'report') {
+    renderReportWizard();
+  }
 }
 
 function toggleSidebar() {
@@ -965,6 +1027,28 @@ function renderAssignmentWizard() {
   renderAssignmentConfirmSummary();
 }
 
+function renderReportWizard() {
+  const requestedStep = REPORT_STEPS.includes(state.report.step) ? state.report.step : 'project';
+  const activeStep = canEnterReportStep(requestedStep) ? requestedStep : getReportFallbackStep();
+  state.report.step = activeStep;
+
+  elements.reportStepButtons.forEach((button) => {
+    const step = button.dataset.reportStep;
+    const active = step === activeStep;
+    const available = canEnterReportStep(step);
+    button.classList.toggle('is-active', active);
+    button.classList.toggle('is-disabled', !available);
+    button.setAttribute('aria-current', active ? 'step' : 'false');
+    button.setAttribute('aria-disabled', available ? 'false' : 'true');
+  });
+
+  elements.reportStepPanels.forEach((panel) => {
+    const active = panel.dataset.reportStepPanel === activeStep;
+    panel.classList.toggle('is-active', active);
+    panel.hidden = !active;
+  });
+}
+
 function renderTableHead() {
   const headCells = ['<th class="checkbox-cell"><input id="toggleAllRows" type="checkbox"></th>']
     .concat(FIELD_DEFS.map((field) => `<th style="min-width:${field.width};">${escapeHtml(field.label)}</th>`))
@@ -1409,6 +1493,7 @@ function renderReport() {
   const reportRows = getReportRows();
   renderSummary(reportRows);
   renderInspectionTable(reportRows);
+  renderReportWizard();
 }
 
 function renderRows() {
@@ -1525,6 +1610,12 @@ function resetAssignmentState() {
   };
 }
 
+function resetReportState() {
+  state.report = {
+    step: 'project'
+  };
+}
+
 function clearProjectState() {
   clearAutoSaveTimer();
   state.project = { ...PROJECT_TEMPLATE };
@@ -1532,6 +1623,7 @@ function clearProjectState() {
   state.filterText = '';
   resetDrawingState();
   resetAssignmentState();
+  resetReportState();
   syncSavedSignature();
   renderAll();
 }
@@ -1579,6 +1671,7 @@ async function selectProject(c2) {
     }
     resetDrawingState();
     resetAssignmentState();
+    state.report.step = state.activeMode === 'report' ? 'drawing' : 'project';
     renderAll();
     syncSavedSignature();
     setStatus(`工事 ${c2} を読み込みました。`);
@@ -2036,6 +2129,7 @@ async function openSearchResult(index) {
   updateFormInputs();
   await loadCurrentDrawing();
   setActiveMode('report');
+  setReportStep('symbols', { silent: true });
 }
 
 function bindEvents() {
@@ -2051,6 +2145,12 @@ function bindEvents() {
     });
   });
 
+  elements.reportStepButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      navigateReportStep(button.dataset.reportStep);
+    });
+  });
+
   document.querySelectorAll('[data-assignment-next]').forEach((button) => {
     button.addEventListener('click', () => {
       void navigateAssignmentStep(button.dataset.assignmentNext);
@@ -2063,6 +2163,18 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll('[data-report-next]').forEach((button) => {
+    button.addEventListener('click', () => {
+      navigateReportStep(button.dataset.reportNext);
+    });
+  });
+
+  document.querySelectorAll('[data-report-prev]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setReportStep(button.dataset.reportPrev);
+    });
+  });
+
   elements.projectSelect.addEventListener('change', async () => {
     await selectProject(elements.projectSelect.value);
   });
@@ -2072,6 +2184,7 @@ function bindEvents() {
   });
   elements.reportProjectSelect?.addEventListener('change', async () => {
     await selectProject(elements.reportProjectSelect.value);
+    setReportStep(state.project.c2 ? 'drawing' : 'project', { silent: true });
     setActiveMode('report');
   });
 
@@ -2259,9 +2372,13 @@ function bindEvents() {
   elements.searchFloorInput.addEventListener('input', syncSearchFromForm);
   elements.searchInsideOutsideInput.addEventListener('input', syncSearchFromForm);
   elements.searchButton.addEventListener('click', performSearch);
-  elements.printButton.addEventListener('click', () => {
+  const printReport = () => {
     setActiveMode('report');
     window.print();
+  };
+  elements.printButton.addEventListener('click', printReport);
+  document.querySelectorAll('[data-report-print]').forEach((button) => {
+    button.addEventListener('click', printReport);
   });
 
   window.addEventListener('beforeunload', (event) => {
@@ -2290,6 +2407,7 @@ function bindEvents() {
     };
     updateFormInputs();
     await loadCurrentDrawing();
+    setReportStep('symbols', { silent: true });
   };
   elements.drawingTabs.addEventListener('click', handleDrawingTabClick);
 
