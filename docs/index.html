@@ -9,8 +9,8 @@
     <link
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
       rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-B9hm5OgX.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BPGtMqG4.css">
+    <script type="module" crossorigin src="./assets/index-BRiJEO8O.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DtIyDopR.css">
   </head>
   <body>
     <div class="app-shell" id="appShell">
@@ -263,23 +263,18 @@
                   <span>検索</span>
                   <input id="assignmentFilterInput" type="search" placeholder="手配書No / 符号">
                 </label>
-                <button id="addSelectionToBoxButton" type="button" class="primary-button">
-                  <span class="material-symbols-outlined">move_to_inbox</span>
-                  <span>選択を新番号へ</span>
-                </button>
-                <button id="addVisibleToBoxButton" type="button" class="ghost-button">
-                  <span class="material-symbols-outlined">select_check_box</span>
-                  <span>表示中を新番号へ</span>
-                </button>
                 <button id="selectAllAssignmentButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">select_all</span>
-                  <span>全選択</span>
+                  <span>表示中を全部入れる</span>
                 </button>
                 <button id="clearAssignmentSelectionButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">disabled_by_default</span>
-                  <span>解除</span>
+                  <span>表示中を外す</span>
                 </button>
                 <span id="assignmentSelectedCount" class="count-pill">0件選択</span>
+              </div>
+              <div class="assignment-target-hint" id="assignmentTargetHint">
+                新手配書番号を選ぶと、チェックした符号がそこへ入ります。
               </div>
 
               <div class="assignment-symbol-workspace">

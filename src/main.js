@@ -79,6 +79,7 @@ const elements = {
   assignmentHistoryList: document.getElementById('assignmentHistoryList'),
   assignmentConfirmSummary: document.getElementById('assignmentConfirmSummary'),
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
+  assignmentTargetHint: document.getElementById('assignmentTargetHint'),
   assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
   assignmentBoxCountSelect: document.getElementById('assignmentBoxCountSelect'),
   assignmentSelectedCount: document.getElementById('assignmentSelectedCount'),
@@ -195,7 +196,7 @@ function canEnterAssignmentStep(step) {
     return Boolean(state.assignment.rows.length);
   }
   if (step === 'confirm') {
-    return state.assignment.boxes.some((box) => box.rowKeys?.size);
+    return state.assignment.boxes.some((box) => getEffectiveAssignmentRowsForBox(box).length);
   }
   return false;
 }
@@ -617,6 +618,19 @@ function addRowsToSpecificAssignmentBox(rowKeys, box) {
   return true;
 }
 
+function removeRowsFromAssignmentBox(rowKeys, box) {
+  if (!box) {
+    return false;
+  }
+  const keys = Array.from(rowKeys || []).filter(Boolean);
+  keys.forEach((key) => box.rowKeys.delete(key));
+  state.assignment.selectedDocIds = new Set();
+  renderAssignmentBoxes();
+  renderAssignmentList();
+  renderAssignmentWizard();
+  return true;
+}
+
 function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = '') {
   const normalizedTarget = String(targetDrawingNumber || '').trim();
   const box = normalizedTarget ? createAssignmentBox(normalizedTarget) : getActiveAssignmentBox();
@@ -630,6 +644,40 @@ function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = '') {
 
 function getAssignmentBoxForRowKey(rowKey) {
   return state.assignment.boxes.find((box) => box.rowKeys?.has(rowKey)) || null;
+}
+
+function getRemainderAssignmentBox() {
+  return state.assignment.boxes.length ? state.assignment.boxes[state.assignment.boxes.length - 1] : null;
+}
+
+function getAssignmentBoxForRowKeyIncludingRemainder(rowKey) {
+  const explicitBox = getAssignmentBoxForRowKey(rowKey);
+  if (explicitBox) {
+    return explicitBox;
+  }
+  return getRemainderAssignmentBox();
+}
+
+function getEffectiveAssignmentRowsForBox(box) {
+  if (!box) {
+    return [];
+  }
+  const rows = getAssignmentRowsForKeys(box.rowKeys || []);
+  if (box.id !== getRemainderAssignmentBox()?.id) {
+    return rows;
+  }
+  const explicitKeys = new Set();
+  state.assignment.boxes.forEach((item) => {
+    if (item.id !== box.id) {
+      Array.from(item.rowKeys || []).forEach((key) => explicitKeys.add(key));
+    }
+  });
+  const ownKeys = new Set(Array.from(box.rowKeys || []));
+  const remainderRows = state.assignment.rows.filter((row) => {
+    const rowKey = getAssignmentSelectionKey(row);
+    return !explicitKeys.has(rowKey) || ownKeys.has(rowKey);
+  });
+  return remainderRows;
 }
 
 function removeAssignmentBox(boxId) {
@@ -655,7 +703,17 @@ function renderAssignmentList() {
   }
   if (elements.assignmentSelectedCount) {
     const visibleCount = getVisibleAssignmentRows().length;
-    elements.assignmentSelectedCount.textContent = `${state.assignment.selectedDocIds.size}件選択 / ${visibleCount}件表示`;
+    const activeBox = getActiveAssignmentBox();
+    const activeRows = activeBox ? getEffectiveAssignmentRowsForBox(activeBox) : [];
+    elements.assignmentSelectedCount.textContent = activeBox
+      ? `${activeBox.targetDrawingNumber} に ${activeRows.length}件 / ${visibleCount}件表示`
+      : `${state.assignment.selectedDocIds.size}件選択 / ${visibleCount}件表示`;
+  }
+  if (elements.assignmentTargetHint) {
+    const activeBox = getActiveAssignmentBox();
+    elements.assignmentTargetHint.innerHTML = activeBox
+      ? `<strong>${escapeHtml(activeBox.targetDrawingNumber)}</strong> に入れる符号をチェックしてください。別の新番号を押すと入れ先が切り替わります。`
+      : '左の新手配書番号を押して、入れ先を選んでください。';
   }
 
   if (!state.project.c2) {
@@ -691,11 +749,13 @@ function renderAssignmentList() {
       const rows = group.rows
         .map((row) => {
           const rowKey = getAssignmentSelectionKey(row);
-          const checked = state.assignment.selectedDocIds.has(rowKey) ? ' checked' : '';
-          const pendingBox = getAssignmentBoxForRowKey(rowKey);
+          const pendingBox = getAssignmentBoxForRowKeyIncludingRemainder(rowKey);
+          const activeBox = getActiveAssignmentBox();
+          const checked = activeBox && pendingBox?.id === activeBox.id ? ' checked' : state.assignment.selectedDocIds.has(rowKey) ? ' checked' : '';
+          const boxClass = pendingBox ? (activeBox && pendingBox.id === activeBox.id ? ' is-boxed is-current-target' : ' is-boxed') : '';
           const detail = [row.name, row.floor, row.insideOutside].filter(Boolean).join(' / ');
           return `
-            <label class="assignment-row${pendingBox ? ' is-boxed' : ''}" draggable="true" data-assignment-drag-row="${escapeHtml(rowKey)}">
+            <label class="assignment-row${boxClass}" draggable="true" data-assignment-drag-row="${escapeHtml(rowKey)}">
               <input type="checkbox" data-assignment-symbol="${escapeHtml(rowKey)}"${checked}>
               <span class="assignment-symbol">${escapeHtml(row.symbol || '-')}</span>
               <small>${escapeHtml(detail)}${pendingBox ? `<b>新番号 ${escapeHtml(pendingBox.targetDrawingNumber)}</b>` : ''}</small>
@@ -790,21 +850,22 @@ function renderAssignmentBoxes() {
 
   const html = state.assignment.boxes
     .map((box) => {
-      const rows = getAssignmentRowsForKeys(box.rowKeys);
+      const rows = getEffectiveAssignmentRowsForBox(box);
       const active = box.id === state.assignment.activeBoxId ? ' is-active' : '';
+      const autoRemainder = box.id === getRemainderAssignmentBox()?.id ? ' is-remainder' : '';
       const preview = rows
         .slice(0, 6)
         .map((row) => row.symbol)
         .filter(Boolean)
         .join(', ');
       return `
-        <article class="assignment-box${active}" data-assignment-box="${escapeHtml(box.id)}" data-assignment-box-drop="${escapeHtml(box.id)}">
+        <article class="assignment-box${active}${autoRemainder}" data-assignment-box="${escapeHtml(box.id)}" data-assignment-box-drop="${escapeHtml(box.id)}">
           <div class="assignment-box-main" data-assignment-box-select="${escapeHtml(box.id)}">
             <label>
               <span>新手配書番号</span>
               <input type="text" value="${escapeHtml(box.targetDrawingNumber)}" data-assignment-box-name="${escapeHtml(box.id)}">
             </label>
-            <span>${rows.length}件${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
+            <span>${rows.length}件${autoRemainder ? ' / 残り自動' : ''}${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
           </div>
           <button type="button" class="assignment-box-delete" data-assignment-box-delete="${escapeHtml(box.id)}">
             <span class="material-symbols-outlined">close</span>
@@ -825,7 +886,7 @@ function renderAssignmentConfirmSummary() {
   const boxes = state.assignment.boxes
     .map((box) => ({
       ...box,
-      rows: getAssignmentRowsForKeys(box.rowKeys || [])
+      rows: getEffectiveAssignmentRowsForBox(box)
     }))
     .filter((box) => box.rows.length);
 
@@ -1655,7 +1716,7 @@ async function applyAssignmentBoxes() {
   const boxes = state.assignment.boxes
     .map((box) => ({
       ...box,
-      symbolIds: getAssignmentDocIdsForKeys(box.rowKeys)
+      symbolIds: getAssignmentDocIdsForKeys(getEffectiveAssignmentRowsForBox(box).map(getAssignmentSelectionKey))
     }))
     .filter((box) => box.targetDrawingNumber && box.symbolIds.length);
 
@@ -2010,10 +2071,20 @@ function bindEvents() {
     renderAssignmentWizard();
   });
   elements.selectAllAssignmentButton.addEventListener('click', () => {
+    const activeBox = getActiveAssignmentBox();
+    if (activeBox) {
+      addRowsToSpecificAssignmentBox(getVisibleAssignmentRows().map(getAssignmentSelectionKey), activeBox);
+      return;
+    }
     state.assignment.selectedDocIds = new Set(getVisibleAssignmentRows().map(getAssignmentSelectionKey));
     renderAssignmentList();
   });
   elements.clearAssignmentSelectionButton.addEventListener('click', () => {
+    const activeBox = getActiveAssignmentBox();
+    if (activeBox) {
+      removeRowsFromAssignmentBox(getVisibleAssignmentRows().map(getAssignmentSelectionKey), activeBox);
+      return;
+    }
     state.assignment.selectedDocIds = new Set();
     renderAssignmentList();
   });
@@ -2131,6 +2202,15 @@ function bindEvents() {
     const symbolCheckbox = event.target.closest('[data-assignment-symbol]');
     if (symbolCheckbox) {
       const rowKey = symbolCheckbox.dataset.assignmentSymbol;
+      const activeBox = getActiveAssignmentBox();
+      if (activeBox) {
+        if (symbolCheckbox.checked) {
+          addRowsToSpecificAssignmentBox([rowKey], activeBox);
+        } else {
+          removeRowsFromAssignmentBox([rowKey], activeBox);
+        }
+        return;
+      }
       if (symbolCheckbox.checked) {
         state.assignment.selectedDocIds.add(rowKey);
       } else {

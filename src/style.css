@@ -519,6 +519,19 @@ h4 {
   gap: 10px;
 }
 
+.assignment-target-hint {
+  padding: 12px 14px;
+  border: 1px solid #c7d7ff;
+  border-radius: 16px;
+  background: #f4f7ff;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.assignment-target-hint strong {
+  color: var(--primary-strong);
+}
+
 .assignment-symbol-workspace {
   display: grid;
   grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1fr);
@@ -555,6 +568,10 @@ h4 {
 .assignment-box.is-drop-target {
   border-color: #16a34a;
   background: #f1fff6;
+}
+
+.assignment-box.is-remainder {
+  background: linear-gradient(180deg, #fff, #f8fbff);
 }
 
 .assignment-box-main,
@@ -737,6 +754,11 @@ h4 {
 
 .assignment-row.is-boxed {
   background: #f7fbff;
+}
+
+.assignment-row.is-current-target {
+  background: #eef5ff;
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .assignment-symbol {
