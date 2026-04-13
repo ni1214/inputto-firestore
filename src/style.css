@@ -269,6 +269,7 @@ h4 {
 .field select,
 .field textarea,
 .inline-field input,
+.inline-field select,
 .bulk-symbol-input {
   width: 100%;
   border: 1px solid var(--panel-border);
@@ -276,6 +277,34 @@ h4 {
   background: white;
   padding: 14px 16px;
   color: var(--text);
+}
+
+.field select,
+.inline-field select {
+  appearance: none;
+  min-height: 54px;
+  padding-right: 44px;
+  background-color: white;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) 52%,
+    calc(100% - 15px) 52%;
+  background-repeat: no-repeat;
+  background-size: 7px 7px, 7px 7px;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.04);
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.inline-field input:focus,
+.inline-field select:focus,
+.bulk-symbol-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(51, 94, 234, 0.12);
+  outline: none;
 }
 
 .field textarea {
