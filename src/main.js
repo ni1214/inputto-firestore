@@ -7,6 +7,7 @@ const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
 const MODE_STORAGE_KEY = 'inputto_active_mode';
 const CONTACT_OPTIONS = ['高橋', '髙林', '小島', '佐野'];
+const DISALLOWED_CONTACTS = new Set(['鈴木', '鈴木様']);
 const DEFAULT_MODE = 'register';
 
 const state = {
@@ -51,6 +52,7 @@ const elements = {
   modePanels: Array.from(document.querySelectorAll('[data-mode-panel]')),
   projectSelect: document.getElementById('projectSelect'),
   assignmentProjectSelect: document.getElementById('assignmentProjectSelect'),
+  reportProjectSelect: document.getElementById('reportProjectSelect'),
   refreshProjectsButton: document.getElementById('refreshProjectsButton'),
   assignmentRefreshProjectsButton: document.getElementById('assignmentRefreshProjectsButton'),
   newProjectButton: document.getElementById('newProjectButton'),
@@ -62,6 +64,7 @@ const elements = {
   drawingNumberInput: document.getElementById('drawingNumberInput'),
   drawingStatusInput: document.getElementById('drawingStatusInput'),
   drawingTabs: document.getElementById('drawingTabs'),
+  assignmentDrawingTabs: document.getElementById('assignmentDrawingTabs'),
   assignmentSymbolsList: document.getElementById('assignmentSymbolsList'),
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
   assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
@@ -129,6 +132,11 @@ function normalizeText(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '');
+}
+
+function sanitizeContact(value) {
+  const contact = String(value || '').trim();
+  return DISALLOWED_CONTACTS.has(contact) ? '' : contact;
 }
 
 function normalizeMode(mode) {
@@ -210,7 +218,7 @@ function syncProjectFromForm() {
     c2: elements.projectC2Input.value.trim(),
     projectName: elements.projectNameInput.value.trim(),
     shortName: elements.projectShortNameInput.value.trim(),
-    contact: elements.projectContactInput.value.trim()
+    contact: sanitizeContact(elements.projectContactInput.value)
   };
 }
 
@@ -234,7 +242,7 @@ function renderContactOptions(value = '') {
     return;
   }
 
-  const currentValue = String(value || '').trim();
+  const currentValue = sanitizeContact(value);
   const options = [...CONTACT_OPTIONS];
   if (currentValue && !options.includes(currentValue)) {
     options.unshift(currentValue);
@@ -247,14 +255,19 @@ function renderContactOptions(value = '') {
 }
 
 function updateFormInputs() {
-  renderContactOptions(state.project.contact || '');
+  const contact = sanitizeContact(state.project.contact || '');
+  state.project.contact = contact;
+  renderContactOptions(contact);
   elements.projectC2Input.value = state.project.c2 || '';
   elements.projectNameInput.value = state.project.projectName || '';
   elements.projectShortNameInput.value = state.project.shortName || '';
-  elements.projectContactInput.value = state.project.contact || '';
+  elements.projectContactInput.value = contact;
   elements.drawingNumberInput.value = state.drawing.drawingNumber || '';
   elements.drawingStatusInput.value = state.drawing.drawingStatus || '';
   elements.filterInput.value = state.filterText || '';
+  if (elements.reportProjectSelect) {
+    elements.reportProjectSelect.value = state.project.c2 || '';
+  }
   elements.searchProjectSelect.value = state.search.projectC2 || '';
   elements.searchKeywordInput.value = state.search.keyword || '';
   elements.searchFloorInput.value = state.search.floor || '';
@@ -281,30 +294,35 @@ function renderProjectSelects() {
   if (elements.assignmentProjectSelect) {
     elements.assignmentProjectSelect.innerHTML = buildProjectOptions(state.project.c2 || '');
   }
+  if (elements.reportProjectSelect) {
+    elements.reportProjectSelect.innerHTML = buildProjectOptions(state.project.c2 || '');
+  }
   elements.searchProjectSelect.innerHTML = buildProjectOptions(state.search.projectC2 || '');
 }
 
 function renderDrawingTabs() {
+  const tabContainers = [elements.drawingTabs, elements.assignmentDrawingTabs].filter(Boolean);
+  let html = '';
   if (!state.project.c2) {
-    elements.drawingTabs.innerHTML = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
-    return;
+    html = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
+  } else if (!state.drawings.length) {
+    html = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
+  } else {
+    html = state.drawings
+      .map((drawing) => {
+        const active = drawing.id === state.selectedDrawingId ? ' is-active' : '';
+        return `
+          <button type="button" class="drawing-chip${active}" data-drawing-id="${escapeHtml(drawing.id)}">
+            <span>${escapeHtml(drawing.drawingNumber || '-')}</span>
+            <small>${escapeHtml(String(drawing.rowCount || 0))}件</small>
+          </button>
+        `;
+      })
+      .join('');
   }
-  if (!state.drawings.length) {
-    elements.drawingTabs.innerHTML = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
-    return;
-  }
-
-  elements.drawingTabs.innerHTML = state.drawings
-    .map((drawing) => {
-      const active = drawing.id === state.selectedDrawingId ? ' is-active' : '';
-      return `
-        <button type="button" class="drawing-chip${active}" data-drawing-id="${escapeHtml(drawing.id)}">
-          <span>${escapeHtml(drawing.drawingNumber || '-')}</span>
-          <small>${escapeHtml(String(drawing.rowCount || 0))}件</small>
-        </button>
-      `;
-    })
-    .join('');
+  tabContainers.forEach((container) => {
+    container.innerHTML = html;
+  });
 }
 
 function getAssignmentGroups() {
@@ -736,7 +754,7 @@ async function handlePdfImport(file) {
       c2: extracted.project.c2 || bundle.project.c2 || '',
       projectName: extracted.project.projectName || bundle.project.projectName || '',
       shortName: extracted.project.shortName || bundle.project.shortName || '',
-      contact: extracted.project.contact || bundle.project.contact || ''
+      contact: sanitizeContact(extracted.project.contact || bundle.project.contact || '')
     };
     state.drawings = bundle.drawings || [];
     state.drawing = {
@@ -987,6 +1005,7 @@ function clearDirectFormValues() {
     elements.projectNameInput,
     elements.projectShortNameInput,
     elements.projectContactInput,
+    elements.reportProjectSelect,
     elements.drawingNumberInput,
     elements.drawingStatusInput,
     elements.bulkSymbolsInput,
@@ -1015,7 +1034,7 @@ async function selectProject(c2) {
       c2: project.c2 || '',
       projectName: project.projectName || '',
       shortName: project.shortName || '',
-      contact: project.contact || ''
+      contact: sanitizeContact(project.contact || '')
     };
     state.drawings = drawings;
     if (!state.search.projectC2) {
@@ -1230,6 +1249,9 @@ async function saveCurrent(options = {}) {
       if (elements.assignmentProjectSelect) {
         elements.assignmentProjectSelect.value = '';
       }
+      if (elements.reportProjectSelect) {
+        elements.reportProjectSelect.value = '';
+      }
       setActiveMode('register');
     }
     setStatus(message);
@@ -1253,6 +1275,9 @@ function startNewProject() {
   elements.projectSelect.value = '';
   if (elements.assignmentProjectSelect) {
     elements.assignmentProjectSelect.value = '';
+  }
+  if (elements.reportProjectSelect) {
+    elements.reportProjectSelect.value = '';
   }
   state.search.projectC2 = '';
   state.search.cacheProjectC2 = '';
@@ -1394,6 +1419,10 @@ function bindEvents() {
     await selectProject(elements.assignmentProjectSelect.value);
     renderAssignmentList();
   });
+  elements.reportProjectSelect?.addEventListener('change', async () => {
+    await selectProject(elements.reportProjectSelect.value);
+    setActiveMode('report');
+  });
 
   elements.refreshProjectsButton.addEventListener('click', refreshProjects);
   elements.assignmentRefreshProjectsButton?.addEventListener('click', refreshProjects);
@@ -1506,7 +1535,7 @@ function bindEvents() {
     return '';
   });
 
-  elements.drawingTabs.addEventListener('click', async (event) => {
+  const handleDrawingTabClick = async (event) => {
     const button = event.target.closest('[data-drawing-id]');
     if (!button) {
       return;
@@ -1523,7 +1552,9 @@ function bindEvents() {
     };
     updateFormInputs();
     await loadCurrentDrawing();
-  });
+  };
+  elements.drawingTabs.addEventListener('click', handleDrawingTabClick);
+  elements.assignmentDrawingTabs?.addEventListener('click', handleDrawingTabClick);
 
   elements.tableBody.addEventListener('input', (event) => {
     const input = event.target.closest('[data-row-id][data-field-key]');
