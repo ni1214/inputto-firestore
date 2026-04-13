@@ -771,16 +771,8 @@ function renderAssignmentList() {
               <strong>${escapeHtml(group.drawingNumber)}</strong>
               <small>${filtering ? `${group.rows.length}/${group.totalRows}件` : `${group.rows.length}件`}</small>
             </div>
-            <button
-              type="button"
-              class="assignment-toggle"
-              data-assignment-toggle="${escapeHtml(group.key)}"
-              aria-expanded="${collapsed ? 'false' : 'true'}">
-              <span class="material-symbols-outlined">${collapsed ? 'expand_more' : 'expand_less'}</span>
-              <span>${collapsed ? '表示' : '非表示'}</span>
-            </button>
           </div>
-          <div class="assignment-group-rows"${collapsed ? ' hidden' : ''}>${rows}</div>
+          <div class="assignment-group-rows">${rows}</div>
         </article>
       `;
     })
@@ -867,9 +859,6 @@ function renderAssignmentBoxes() {
             </label>
             <span>${rows.length}件${autoRemainder ? ' / 残り自動' : ''}${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
           </div>
-          <button type="button" class="assignment-box-delete" data-assignment-box-delete="${escapeHtml(box.id)}">
-            <span class="material-symbols-outlined">close</span>
-          </button>
         </article>
       `;
     })
@@ -2114,10 +2103,6 @@ function bindEvents() {
         }
         return;
       }
-      const deleteButton = event.target.closest('[data-assignment-box-delete]');
-      if (deleteButton) {
-        removeAssignmentBox(deleteButton.dataset.assignmentBoxDelete);
-      }
     });
     boxList.addEventListener('input', (event) => {
       const input = event.target.closest('[data-assignment-box-name]');
@@ -2155,19 +2140,6 @@ function bindEvents() {
       const box = state.assignment.boxes.find((item) => item.id === dropTarget.dataset.assignmentBoxDrop);
       addRowsToSpecificAssignmentBox(rowKey ? [rowKey] : [], box);
     });
-  });
-  elements.assignmentSymbolsList.addEventListener('click', (event) => {
-    const toggleButton = event.target.closest('[data-assignment-toggle]');
-    if (!toggleButton) {
-      return;
-    }
-    const key = toggleButton.dataset.assignmentToggle;
-    if (state.assignment.collapsedGroupKeys.has(key)) {
-      state.assignment.collapsedGroupKeys.delete(key);
-    } else {
-      state.assignment.collapsedGroupKeys.add(key);
-    }
-    renderAssignmentList();
   });
   elements.assignmentSymbolsList.addEventListener('dragstart', (event) => {
     const row = event.target.closest('[data-assignment-drag-row]');

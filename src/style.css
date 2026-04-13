@@ -512,6 +512,10 @@ h4 {
   animation: assignment-page-in 0.18s ease-out;
 }
 
+.assignment-step-panel[data-assignment-step-panel="symbols"].is-active {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
 .assignment-controls {
   display: flex;
   align-items: end;
@@ -537,10 +541,13 @@ h4 {
   grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .assignment-drop-dock {
   align-content: start;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .assignment-boxes {
@@ -551,7 +558,7 @@ h4 {
 
 .assignment-box {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   border: 1px solid var(--panel-border);
   border-radius: 18px;
@@ -574,8 +581,7 @@ h4 {
   background: linear-gradient(180deg, #fff, #f8fbff);
 }
 
-.assignment-box-main,
-.assignment-box-delete {
+.assignment-box-main {
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -618,19 +624,6 @@ h4 {
 .assignment-box-main > span {
   color: var(--muted);
   font-weight: 700;
-}
-
-.assignment-box-delete {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  color: var(--muted);
-  border-left: 1px solid var(--panel-border);
-}
-
-.assignment-box-delete:hover {
-  color: var(--danger);
-  background: #fff1f3;
 }
 
 .assignment-confirm-summary {
@@ -688,6 +681,12 @@ h4 {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 4px;
+}
+
+.assignment-symbol-workspace .assignment-list {
+  max-height: none;
+  height: 100%;
+  min-height: 0;
 }
 
 .assignment-group {
