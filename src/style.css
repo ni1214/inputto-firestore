@@ -447,16 +447,10 @@ h4 {
 }
 
 .assignment-step-panel {
-  display: none;
   min-height: 100%;
   align-content: start;
   overflow: auto;
   overscroll-behavior: contain;
-}
-
-.assignment-step-panel.is-active {
-  display: grid;
-  animation: assignment-page-in 0.18s ease-out;
 }
 
 @keyframes assignment-page-in {
@@ -486,6 +480,17 @@ h4 {
   border-radius: 20px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.68);
+}
+
+.assignment-step-panel,
+.assignment-step-panel[hidden],
+.assignment-step-panel:not(.is-active) {
+  display: none !important;
+}
+
+.assignment-step-panel.is-active {
+  display: grid !important;
+  animation: assignment-page-in 0.18s ease-out;
 }
 
 .assignment-controls {
