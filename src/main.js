@@ -1681,7 +1681,7 @@ async function selectProject(c2) {
     }
     resetDrawingState();
     resetAssignmentState();
-    state.report.step = state.activeMode === 'report' ? 'drawing' : 'project';
+    state.report.step = 'project';
     renderAll();
     syncSavedSignature();
     setStatus(`工事 ${c2} を読み込みました。`);
@@ -2194,7 +2194,6 @@ function bindEvents() {
   });
   elements.reportProjectSelect?.addEventListener('change', async () => {
     await selectProject(elements.reportProjectSelect.value);
-    setReportStep(state.project.c2 ? 'drawing' : 'project', { silent: true });
     setActiveMode('report');
   });
 
