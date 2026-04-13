@@ -72,6 +72,7 @@ const elements = {
   drawingStatusInput: document.getElementById('drawingStatusInput'),
   drawingTabs: document.getElementById('drawingTabs'),
   assignmentDrawingTabs: document.getElementById('assignmentDrawingTabs'),
+  assignmentStage: document.getElementById('assignmentStage'),
   assignmentStepButtons: Array.from(document.querySelectorAll('[data-assignment-step]')),
   assignmentStepPanels: Array.from(document.querySelectorAll('[data-assignment-step-panel]')),
   assignmentSymbolsList: document.getElementById('assignmentSymbolsList'),
@@ -211,8 +212,12 @@ function setAssignmentStep(step, options = {}) {
     }
     return false;
   }
+  const stepChanged = state.assignment.step !== nextStep;
   state.assignment.step = nextStep;
   renderAssignmentWizard();
+  if (stepChanged && elements.assignmentStage) {
+    elements.assignmentStage.scrollTo({ top: 0, behavior: 'smooth' });
+  }
   return true;
 }
 

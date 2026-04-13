@@ -385,6 +385,11 @@ h4 {
   color: rgba(255, 255, 255, 0.82);
 }
 
+.assignment-workflow {
+  min-height: calc(100vh - 48px);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .assignment-stepper {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -434,12 +439,36 @@ h4 {
   opacity: 0.45;
 }
 
+.assignment-stage {
+  display: grid;
+  min-height: min(680px, calc(100vh - 220px));
+  max-height: calc(100vh - 220px);
+  overflow: hidden;
+}
+
 .assignment-step-panel {
   display: none;
+  min-height: 100%;
+  align-content: start;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .assignment-step-panel.is-active {
   display: grid;
+  animation: assignment-page-in 0.18s ease-out;
+}
+
+@keyframes assignment-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .assignment-step-actions {
