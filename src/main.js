@@ -1327,7 +1327,7 @@ async function openSearchResult(index) {
   };
   updateFormInputs();
   await loadCurrentDrawing();
-  setActiveMode('assignment-edit');
+  setActiveMode('report');
 }
 
 function bindEvents() {
