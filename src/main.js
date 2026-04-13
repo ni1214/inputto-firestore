@@ -11,6 +11,7 @@ const DISALLOWED_CONTACTS = new Set(['鈴木', '鈴木様']);
 const DEFAULT_MODE = 'register';
 const ASSIGNMENT_ALL_GROUP = '__all__';
 const ASSIGNMENT_STEPS = ['project', 'load', 'boxes', 'symbols', 'confirm'];
+const FIRESTORE_LOAD_TIMEOUT_MS = 15000;
 
 const state = {
   env: 'production',
@@ -152,6 +153,21 @@ function normalizeText(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '');
+}
+
+function withLoadTimeout(promise, message = '通信が混み合っています。更新ボタンで再試行してください。') {
+  let timeoutId = null;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(message));
+    }, FIRESTORE_LOAD_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  });
 }
 
 function sanitizeContact(value) {
@@ -524,6 +540,22 @@ function getAssignmentRowsForKeys(rowKeys) {
 
 function getAssignmentDocIdsForKeys(rowKeys) {
   return Array.from(new Set(getAssignmentRowsForKeys(rowKeys).map((row) => row.docId).filter(Boolean)));
+}
+
+function getAssignmentSymbolRefsForRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      docId: row.docId || row.id || '',
+      drawingId: row.drawingId || '',
+      drawingNumber: row.drawingNumber || '',
+      symbol: row.symbol || '',
+      symbolN: row.symbolN || normalizeText(row.symbol)
+    }))
+    .filter((ref) => ref.docId || (ref.symbolN && (ref.drawingId || ref.drawingNumber)));
+}
+
+function getAssignmentSymbolRefsForKeys(rowKeys) {
+  return getAssignmentSymbolRefsForRows(getAssignmentRowsForKeys(rowKeys));
 }
 
 function getSelectedAssignmentGroups() {
@@ -1244,7 +1276,7 @@ async function handlePdfImport(file) {
     const extracted = await extractHandaiDataFromPdf(file);
 
     const bundle = extracted.project.c2
-      ? await loadProjectBundle(state.env, extracted.project.c2)
+      ? await withLoadTimeout(loadProjectBundle(state.env, extracted.project.c2))
       : { project: { ...PROJECT_TEMPLATE }, drawings: [] };
 
     state.project = {
@@ -1461,7 +1493,7 @@ function renderAll() {
 async function refreshProjects() {
   setBusy('loading', '工事一覧を読み込んでいます。');
   try {
-    state.projects = await listProjects(state.env);
+    state.projects = await withLoadTimeout(listProjects(state.env));
     renderProjectSelects();
     setStatus('工事一覧を更新しました。');
   } catch (error) {
@@ -1534,7 +1566,7 @@ async function selectProject(c2) {
 
   setBusy('loading', `工事 ${c2} を読み込んでいます。`);
   try {
-    const { project, drawings } = await loadProjectBundle(state.env, c2);
+    const { project, drawings } = await withLoadTimeout(loadProjectBundle(state.env, c2));
     state.project = {
       c2: project.c2 || '',
       projectName: project.projectName || '',
@@ -1580,7 +1612,7 @@ async function loadCurrentDrawing() {
       drawingNumber: state.drawing.drawingNumber,
       drawingStatus: drawing?.drawingStatus || state.drawing.drawingStatus || ''
     };
-    state.rows = drawingId ? await loadDrawingRows(state.env, state.project.c2, drawingId) : [];
+    state.rows = drawingId ? await withLoadTimeout(loadDrawingRows(state.env, state.project.c2, drawingId)) : [];
     state.rows = state.rows.length ? state.rows : [createUiRow()];
     state.selectedRowIds = new Set();
     syncBulkSymbolsInput(state.rows);
@@ -1610,10 +1642,10 @@ async function loadAssignmentSymbols(options = {}) {
     setBusy('loading', '登録済み符号を読み込んでいます。');
   }
   try {
-    const [rows, history] = await Promise.all([
+    const [rows, history] = await withLoadTimeout(Promise.all([
       loadProjectSymbols(state.env, state.project.c2),
       loadAssignmentHistory(state.env, state.project.c2)
-    ]);
+    ]));
     state.assignment.rows = rows;
     state.assignment.history = history;
     getActiveAssignmentGroupKeys(getAssignmentGroups());
@@ -1646,13 +1678,14 @@ async function moveSelectedAssignmentSymbols() {
   syncProjectFromForm();
   syncDrawingFromForm();
   const targetDrawingNumber = String(state.assignment.targetDrawingNumber || '').trim();
-  const selectedIds = getSelectedAssignmentDocIds();
+  const selectedRefs = getAssignmentSymbolRefsForKeys(state.assignment.selectedDocIds);
+  const selectedIds = Array.from(new Set(selectedRefs.map((ref) => ref.docId).filter(Boolean)));
 
   if (!state.project.c2 || !state.project.projectName) {
     showToast('先に工事を選んでください。', 'error');
     return;
   }
-  if (!selectedIds.length) {
+  if (!selectedRefs.length) {
     showToast('移動する符号をチェックしてください。', 'error');
     return;
   }
@@ -1672,6 +1705,7 @@ async function moveSelectedAssignmentSymbols() {
         drawingStatus: state.drawing.drawingNumber === targetDrawingNumber ? state.drawing.drawingStatus : ''
       },
       symbolIds: selectedIds,
+      symbolRefs: selectedRefs,
       operator: SAVE_ACTOR
     });
 
@@ -1697,7 +1731,7 @@ async function moveSelectedAssignmentSymbols() {
     syncSavedSignature();
     await refreshProjects();
     await loadAssignmentSymbols({ silent: true });
-    const message = `${selectedIds.length}件を手配書No ${targetDrawingNumber} に移動しました。`;
+    const message = `${selectedRefs.length}件を手配書No ${targetDrawingNumber} に移動しました。`;
     setStatus(message);
     showToast(message, 'success');
   } catch (error) {
@@ -1711,11 +1745,17 @@ async function moveSelectedAssignmentSymbols() {
 async function applyAssignmentBoxes() {
   syncProjectFromForm();
   const boxes = state.assignment.boxes
-    .map((box) => ({
-      ...box,
-      symbolIds: getAssignmentDocIdsForKeys(getEffectiveAssignmentRowsForBox(box).map(getAssignmentSelectionKey))
-    }))
-    .filter((box) => box.targetDrawingNumber && box.symbolIds.length);
+    .map((box) => {
+      const rows = getEffectiveAssignmentRowsForBox(box);
+      const symbolRefs = getAssignmentSymbolRefsForRows(rows);
+      return {
+        ...box,
+        rows,
+        symbolRefs,
+        symbolIds: Array.from(new Set(symbolRefs.map((ref) => ref.docId).filter(Boolean)))
+      };
+    })
+    .filter((box) => box.targetDrawingNumber && box.symbolRefs.length);
 
   if (!state.project.c2 || !state.project.projectName) {
     showToast('先に工事を選んでください。', 'error');
@@ -1738,6 +1778,7 @@ async function applyAssignmentBoxes() {
           drawingStatus: ''
         },
         symbolIds: box.symbolIds,
+        symbolRefs: box.symbolRefs,
         operator: SAVE_ACTOR
       });
       state.project = {
@@ -1767,7 +1808,7 @@ async function applyAssignmentBoxes() {
     syncSavedSignature();
     await refreshProjects();
     await loadAssignmentSymbols({ silent: true });
-    const movedCount = boxes.reduce((sum, box) => sum + box.symbolIds.length, 0);
+    const movedCount = boxes.reduce((sum, box) => sum + box.symbolRefs.length, 0);
     const message = `${boxes.length}個の新手配書番号、${movedCount}件の符号を登録しました。`;
     setStatus(message);
     showToast(message, 'success');
@@ -1940,7 +1981,7 @@ async function performSearch() {
   try {
     if (state.search.cacheProjectC2 !== state.search.projectC2) {
       setBusy('loading', `工事 ${state.search.projectC2} の検索用データを読み込んでいます。`);
-      state.search.cacheRows = await loadProjectSymbols(state.env, state.search.projectC2);
+      state.search.cacheRows = await withLoadTimeout(loadProjectSymbols(state.env, state.search.projectC2));
       state.search.cacheProjectC2 = state.search.projectC2;
     } else {
       setBusy('loading', '検索条件を絞り込んでいます。');

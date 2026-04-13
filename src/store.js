@@ -8,7 +8,7 @@ import {
   writeBatch,
   where,
   serverTimestamp
-} from 'firebase/firestore';
+} from 'firebase/firestore/lite';
 import { db } from './firebase.js';
 
 function normalizeText(value) {
@@ -140,6 +140,49 @@ function sanitizeRow(row) {
     frameShipDate: sanitizeDateText(row.frameShipDate),
     doorShipDate: sanitizeDateText(row.doorShipDate)
   };
+}
+
+function sanitizeSymbolRef(ref) {
+  if (typeof ref === 'string') {
+    return {
+      docId: sanitizeText(ref),
+      drawingId: '',
+      drawingNumber: '',
+      symbol: '',
+      symbolN: ''
+    };
+  }
+
+  const symbol = sanitizeText(ref?.symbol);
+  return {
+    docId: sanitizeText(ref?.docId || ref?.id),
+    drawingId: sanitizeText(ref?.drawingId),
+    drawingNumber: sanitizeText(ref?.drawingNumber),
+    symbol,
+    symbolN: sanitizeText(ref?.symbolN) || normalizeText(symbol)
+  };
+}
+
+function symbolEntryMatchesRef(entry, ref) {
+  const symbolKey = ref.symbolN || normalizeText(ref.symbol);
+  const entrySymbolKey = sanitizeText(entry.symbolN) || normalizeText(entry.symbol);
+  if (!symbolKey || symbolKey !== entrySymbolKey) {
+    return false;
+  }
+  if (ref.drawingId && sanitizeText(entry.drawingId) === ref.drawingId) {
+    return true;
+  }
+  return Boolean(ref.drawingNumber && normalizeText(entry.drawingNumber) === normalizeText(ref.drawingNumber));
+}
+
+function findEntryForSymbolRef(entries, ref) {
+  if (ref.docId) {
+    const byId = entries.find((entry) => entry.id === ref.docId);
+    if (byId) {
+      return byId;
+    }
+  }
+  return entries.find((entry) => symbolEntryMatchesRef(entry, ref)) || null;
 }
 
 function hasAnyRowContent(row) {
@@ -381,8 +424,8 @@ export async function loadDrawingRows(env, c2, drawingId) {
   return snapshot.docs
     .map((item) => ({
       uiId: crypto.randomUUID(),
-      docId: item.id,
-      ...item.data()
+      ...item.data(),
+      docId: item.id
     }))
     .sort(sortSymbolsByLabel);
 }
@@ -392,8 +435,8 @@ export async function loadProjectSymbols(env, c2) {
   return snapshot.docs
     .map((item) => ({
       uiId: crypto.randomUUID(),
-      docId: item.id,
-      ...item.data()
+      ...item.data(),
+      docId: item.id
     }))
     .filter((item) => sanitizeText(item.drawingId))
     .sort((left, right) => {
@@ -415,15 +458,18 @@ export async function loadAssignmentHistory(env, c2) {
     .slice(0, 30);
 }
 
-export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds, operator }) {
+export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds, symbolRefs, operator }) {
   const cleanProject = await saveProjectHeader(env, project, operator);
   const cleanDrawing = sanitizeDrawing(drawing);
-  const ids = Array.from(new Set((Array.isArray(symbolIds) ? symbolIds : []).map(sanitizeText).filter(Boolean)));
+  const requestedRefs = [
+    ...(Array.isArray(symbolIds) ? symbolIds : []).map(sanitizeSymbolRef),
+    ...(Array.isArray(symbolRefs) ? symbolRefs : []).map(sanitizeSymbolRef)
+  ].filter((ref) => ref.docId || (ref.symbolN && (ref.drawingId || ref.drawingNumber)));
 
   if (!cleanDrawing.drawingNumber) {
     throw new Error('移動先の手配書Noを入力してください。');
   }
-  if (!ids.length) {
+  if (!requestedRefs.length) {
     throw new Error('移動する符号を選択してください。');
   }
 
@@ -437,12 +483,22 @@ export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds,
     .find((item) => normalizeText(item.drawingNumber) === normalizedDrawingNumber);
   const drawingId = sanitizeText(drawing.id) || existingDrawing?.id || makeDrawingId(cleanDrawing.drawingNumber);
   const drawingStatus = cleanDrawing.drawingStatus || sanitizeText(existingDrawing?.drawingStatus);
-  const selectedIdSet = new Set(ids);
-  const selectedEntries = symbolSnapshot.docs
-    .map((item) => ({ id: item.id, ...item.data() }))
-    .filter((item) => selectedIdSet.has(item.id));
+  const allEntries = symbolSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const selectedEntryMap = new Map();
+  const missingRefs = [];
 
-  if (selectedEntries.length !== ids.length) {
+  requestedRefs.forEach((ref) => {
+    const entry = findEntryForSymbolRef(allEntries, ref);
+    if (entry) {
+      selectedEntryMap.set(entry.id, entry);
+      return;
+    }
+    missingRefs.push(ref);
+  });
+
+  const selectedEntries = Array.from(selectedEntryMap.values());
+
+  if (missingRefs.length) {
     throw new Error('選択した符号の一部が見つかりません。登録済み一覧を読み込み直してください。');
   }
 
@@ -536,8 +592,8 @@ export async function assignSymbolsToDrawing({ env, project, drawing, symbolIds,
     rows: rowsSnapshot.docs
       .map((item) => ({
         uiId: crypto.randomUUID(),
-        docId: item.id,
-        ...item.data()
+        ...item.data(),
+        docId: item.id
       }))
       .sort(sortSymbolsByLabel)
   };
@@ -673,8 +729,8 @@ async function saveDrawingBundleCore({ env, project, drawing, rows, operator, pr
     rows: rowsSnapshot.docs
       .map((item) => ({
         uiId: crypto.randomUUID(),
-        docId: item.id,
-        ...item.data()
+        ...item.data(),
+        docId: item.id
       }))
       .sort(sortSymbolsByLabel)
   };
