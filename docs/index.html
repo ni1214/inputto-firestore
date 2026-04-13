@@ -9,8 +9,8 @@
     <link
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
       rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-DCVUaDoB.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BHirBlNU.css">
+    <script type="module" crossorigin src="./assets/index-B9hm5OgX.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BPGtMqG4.css">
   </head>
   <body>
     <div class="app-shell" id="appShell">
@@ -155,7 +155,7 @@
               </button>
               <button type="button" class="assignment-step" data-assignment-step="boxes">
                 <small>3</small>
-                <span>箱</span>
+                <span>新番号</span>
               </button>
               <button type="button" class="assignment-step" data-assignment-step="symbols">
                 <small>4</small>
@@ -200,7 +200,7 @@
                   <span>戻る</span>
                 </button>
                 <button type="button" class="primary-button" data-assignment-next="boxes">
-                  <span>箱へ</span>
+                  <span>新番号へ</span>
                   <span class="material-symbols-outlined">arrow_forward</span>
                 </button>
               </div>
@@ -208,22 +208,37 @@
 
             <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="boxes">
               <div class="section-head">
-                <h3>3. 分割・統合する箱を作る</h3>
+                <h3>3. 新手配書番号を作る</h3>
               </div>
 
               <div class="assignment-controls">
                 <label class="inline-field inline-field-compact">
-                  <span>箱</span>
-                  <input id="assignmentTargetDrawingInput" type="text" placeholder="例: 1-1">
+                  <span>新手配書番号</span>
+                  <input id="assignmentTargetDrawingInput" type="text" placeholder="例: 1">
+                </label>
+                <label class="inline-field inline-field-compact">
+                  <span>作成数</span>
+                  <select id="assignmentBoxCountSelect">
+                    <option value="1">1個</option>
+                    <option value="2">2個</option>
+                    <option value="3">3個</option>
+                    <option value="4">4個</option>
+                    <option value="5">5個</option>
+                    <option value="6">6個</option>
+                    <option value="7">7個</option>
+                    <option value="8">8個</option>
+                    <option value="9">9個</option>
+                    <option value="10">10個</option>
+                  </select>
                 </label>
                 <button id="addAssignmentBoxButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">inventory_2</span>
-                  <span>箱を作る</span>
+                  <span>新番号を作成</span>
                 </button>
               </div>
 
-              <div class="assignment-boxes" id="assignmentBoxesList">
-                <p class="empty-text">箱を作ると、ここに分割・統合先が表示されます。</p>
+              <div class="assignment-boxes" id="assignmentBoxesList" data-assignment-boxes-list>
+                <p class="empty-text">作成数を選ぶと、新手配書番号がここに表示されます。</p>
               </div>
 
               <div class="assignment-step-actions">
@@ -240,7 +255,7 @@
 
             <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="symbols">
               <div class="section-head">
-                <h3>4. 符号を箱へ入れる</h3>
+                <h3>4. 符号を新手配書番号へ入れる</h3>
               </div>
 
               <div class="assignment-controls">
@@ -250,11 +265,11 @@
                 </label>
                 <button id="addSelectionToBoxButton" type="button" class="primary-button">
                   <span class="material-symbols-outlined">move_to_inbox</span>
-                  <span>選択を箱へ</span>
+                  <span>選択を新番号へ</span>
                 </button>
                 <button id="addVisibleToBoxButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">select_check_box</span>
-                  <span>表示中を箱へ</span>
+                  <span>表示中を新番号へ</span>
                 </button>
                 <button id="selectAllAssignmentButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">select_all</span>
@@ -267,8 +282,13 @@
                 <span id="assignmentSelectedCount" class="count-pill">0件選択</span>
               </div>
 
-              <div id="assignmentSymbolsList" class="assignment-list">
-                <p class="empty-text">登録済みを読込すると、符号をチェックして箱へ入れられます。</p>
+              <div class="assignment-symbol-workspace">
+                <div class="assignment-boxes assignment-drop-dock" data-assignment-boxes-list>
+                  <p class="empty-text">新手配書番号を作ると、ここへドラッグできます。</p>
+                </div>
+                <div id="assignmentSymbolsList" class="assignment-list">
+                  <p class="empty-text">符号をチェック、またはドラッグして新手配書番号へ入れられます。</p>
+                </div>
               </div>
 
               <div class="assignment-step-actions">
@@ -285,21 +305,21 @@
 
             <section class="subpanel stack-lg assignment-editor assignment-step-panel" data-assignment-step-panel="confirm">
               <div class="section-head">
-                <h3>5. 箱を登録する</h3>
+                <h3>5. 新手配書番号を登録する</h3>
               </div>
 
               <div class="assignment-confirm-summary" id="assignmentConfirmSummary">
-                <p class="empty-text">箱に符号を入れると、ここで登録内容を確認できます。</p>
+                <p class="empty-text">新手配書番号に符号を入れると、ここで登録内容を確認できます。</p>
               </div>
 
               <div class="cluster">
                 <button id="applyAssignmentBoxesButton" type="button" class="primary-button">
                   <span class="material-symbols-outlined">done_all</span>
-                  <span>箱を登録</span>
+                  <span>新番号を登録</span>
                 </button>
                 <button id="clearAssignmentBoxesButton" type="button" class="ghost-button">
                   <span class="material-symbols-outlined">ink_eraser</span>
-                  <span>箱を空にする</span>
+                  <span>新番号を空にする</span>
                 </button>
               </div>
 

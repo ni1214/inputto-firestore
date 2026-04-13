@@ -80,8 +80,10 @@ const elements = {
   assignmentConfirmSummary: document.getElementById('assignmentConfirmSummary'),
   assignmentFilterInput: document.getElementById('assignmentFilterInput'),
   assignmentTargetDrawingInput: document.getElementById('assignmentTargetDrawingInput'),
+  assignmentBoxCountSelect: document.getElementById('assignmentBoxCountSelect'),
   assignmentSelectedCount: document.getElementById('assignmentSelectedCount'),
   assignmentBoxesList: document.getElementById('assignmentBoxesList'),
+  assignmentBoxesLists: Array.from(document.querySelectorAll('[data-assignment-boxes-list]')),
   loadAssignmentButton: document.getElementById('loadAssignmentButton'),
   addAssignmentBoxButton: document.getElementById('addAssignmentBoxButton'),
   addSelectionToBoxButton: document.getElementById('addSelectionToBoxButton'),
@@ -207,13 +209,16 @@ function setAssignmentStep(step, options = {}) {
       } else if (nextStep === 'boxes' || nextStep === 'symbols') {
         showToast('先に登録済みを読込してください。', 'error');
       } else if (nextStep === 'confirm') {
-        showToast('箱に符号を入れてください。', 'error');
+        showToast('新手配書番号に符号を入れてください。', 'error');
       }
     }
     return false;
   }
   const stepChanged = state.assignment.step !== nextStep;
   state.assignment.step = nextStep;
+  if (stepChanged) {
+    renderAssignmentBoxes();
+  }
   renderAssignmentWizard();
   if (stepChanged && elements.assignmentStage) {
     elements.assignmentStage.scrollTo({ top: 0, behavior: 'smooth' });
@@ -514,6 +519,37 @@ function getAssignmentDocIdsForKeys(rowKeys) {
   return Array.from(new Set(getAssignmentRowsForKeys(rowKeys).map((row) => row.docId).filter(Boolean)));
 }
 
+function getSelectedAssignmentGroups() {
+  const groups = getAssignmentGroups();
+  const activeKeys = getActiveAssignmentGroupKeys(groups);
+  return groups.filter((group) => activeKeys.has(group.key));
+}
+
+function getDefaultAssignmentTargetBase() {
+  const selectedGroups = getSelectedAssignmentGroups();
+  const numbers = selectedGroups.map((group) => group.drawingNumber).filter(Boolean);
+  if (!numbers.length) {
+    return '';
+  }
+  const bases = numbers.map((number) => String(number).split('-')[0]).filter(Boolean);
+  if (bases.length && bases.every((base) => base === bases[0])) {
+    return bases[0];
+  }
+  return numbers[0];
+}
+
+function buildAssignmentTargetNumbers(base, count) {
+  const normalizedBase = String(base || '').trim();
+  const total = Math.max(1, Math.min(10, Number(count) || 1));
+  if (!normalizedBase) {
+    return [];
+  }
+  if (total === 1) {
+    return [normalizedBase];
+  }
+  return Array.from({ length: total }, (_, index) => `${normalizedBase}-${index + 1}`);
+}
+
 function createAssignmentBox(targetDrawingNumber) {
   const normalizedTarget = String(targetDrawingNumber || '').trim();
   if (!normalizedTarget) {
@@ -534,21 +570,37 @@ function createAssignmentBox(targetDrawingNumber) {
   return box;
 }
 
+function createAssignmentBoxesFromControls() {
+  const base = state.assignment.targetDrawingNumber || getDefaultAssignmentTargetBase();
+  const targets = buildAssignmentTargetNumbers(base, elements.assignmentBoxCountSelect?.value || 1);
+  if (!targets.length) {
+    showToast('新手配書番号を入力してください。', 'error');
+    elements.assignmentTargetDrawingInput?.focus();
+    return false;
+  }
+  targets.forEach(createAssignmentBox);
+  const firstBox = state.assignment.boxes.find((box) => normalizeText(box.targetDrawingNumber) === normalizeText(targets[0]));
+  if (firstBox) {
+    state.assignment.activeBoxId = firstBox.id;
+    state.assignment.targetDrawingNumber = firstBox.targetDrawingNumber;
+  }
+  renderAssignmentBoxes();
+  renderAssignmentWizard();
+  return true;
+}
+
 function getActiveAssignmentBox() {
   return state.assignment.boxes.find((box) => box.id === state.assignment.activeBoxId) || state.assignment.boxes[0] || null;
 }
 
-function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = state.assignment.targetDrawingNumber) {
-  const normalizedTarget = String(targetDrawingNumber || '').trim();
-  const box = normalizedTarget ? createAssignmentBox(normalizedTarget) : getActiveAssignmentBox();
+function addRowsToSpecificAssignmentBox(rowKeys, box) {
   if (!box) {
-    showToast('箱の手配書Noを入力してください。', 'error');
-    elements.assignmentTargetDrawingInput?.focus();
+    showToast('入れ先の新手配書番号を選んでください。', 'error');
     return false;
   }
   const keys = Array.from(rowKeys || []).filter(Boolean);
   if (!keys.length) {
-    showToast('箱に入れる符号を選んでください。', 'error');
+    showToast('入れる符号を選んでください。', 'error');
     return false;
   }
 
@@ -556,11 +608,24 @@ function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = state.assignment.
     keys.forEach((key) => item.rowKeys.delete(key));
   });
   keys.forEach((key) => box.rowKeys.add(key));
+  state.assignment.activeBoxId = box.id;
+  state.assignment.targetDrawingNumber = box.targetDrawingNumber;
   state.assignment.selectedDocIds = new Set();
   renderAssignmentBoxes();
   renderAssignmentList();
   renderAssignmentWizard();
   return true;
+}
+
+function addRowsToAssignmentBox(rowKeys, targetDrawingNumber = '') {
+  const normalizedTarget = String(targetDrawingNumber || '').trim();
+  const box = normalizedTarget ? createAssignmentBox(normalizedTarget) : getActiveAssignmentBox();
+  if (!box && !state.assignment.boxes.length) {
+    showToast('先に新手配書番号を作成してください。', 'error');
+    elements.assignmentTargetDrawingInput?.focus();
+    return false;
+  }
+  return addRowsToSpecificAssignmentBox(rowKeys, box);
 }
 
 function getAssignmentBoxForRowKey(rowKey) {
@@ -630,10 +695,10 @@ function renderAssignmentList() {
           const pendingBox = getAssignmentBoxForRowKey(rowKey);
           const detail = [row.name, row.floor, row.insideOutside].filter(Boolean).join(' / ');
           return `
-            <label class="assignment-row${pendingBox ? ' is-boxed' : ''}">
+            <label class="assignment-row${pendingBox ? ' is-boxed' : ''}" draggable="true" data-assignment-drag-row="${escapeHtml(rowKey)}">
               <input type="checkbox" data-assignment-symbol="${escapeHtml(rowKey)}"${checked}>
               <span class="assignment-symbol">${escapeHtml(row.symbol || '-')}</span>
-              <small>${escapeHtml(detail)}${pendingBox ? `<b>箱 ${escapeHtml(pendingBox.targetDrawingNumber)}</b>` : ''}</small>
+              <small>${escapeHtml(detail)}${pendingBox ? `<b>新番号 ${escapeHtml(pendingBox.targetDrawingNumber)}</b>` : ''}</small>
             </label>
           `;
         })
@@ -709,15 +774,21 @@ function renderAssignmentHistory() {
 }
 
 function renderAssignmentBoxes() {
-  if (!elements.assignmentBoxesList) {
+  const lists = elements.assignmentBoxesLists?.length ? elements.assignmentBoxesLists : [elements.assignmentBoxesList].filter(Boolean);
+  if (!lists.length) {
     return;
   }
+  if (elements.assignmentTargetDrawingInput && !state.assignment.targetDrawingNumber) {
+    elements.assignmentTargetDrawingInput.value = getDefaultAssignmentTargetBase();
+  }
   if (!state.assignment.boxes.length) {
-    elements.assignmentBoxesList.innerHTML = '<p class="empty-text">箱を作ると、ここに分割・統合先が表示されます。</p>';
+    lists.forEach((list) => {
+      list.innerHTML = '<p class="empty-text">作成数を選ぶと、新手配書番号がここに表示されます。</p>';
+    });
     return;
   }
 
-  elements.assignmentBoxesList.innerHTML = state.assignment.boxes
+  const html = state.assignment.boxes
     .map((box) => {
       const rows = getAssignmentRowsForKeys(box.rowKeys);
       const active = box.id === state.assignment.activeBoxId ? ' is-active' : '';
@@ -727,11 +798,14 @@ function renderAssignmentBoxes() {
         .filter(Boolean)
         .join(', ');
       return `
-        <article class="assignment-box${active}" data-assignment-box="${escapeHtml(box.id)}">
-          <button type="button" class="assignment-box-main" data-assignment-box-select="${escapeHtml(box.id)}">
-            <strong>${escapeHtml(box.targetDrawingNumber)}</strong>
+        <article class="assignment-box${active}" data-assignment-box="${escapeHtml(box.id)}" data-assignment-box-drop="${escapeHtml(box.id)}">
+          <div class="assignment-box-main" data-assignment-box-select="${escapeHtml(box.id)}">
+            <label>
+              <span>新手配書番号</span>
+              <input type="text" value="${escapeHtml(box.targetDrawingNumber)}" data-assignment-box-name="${escapeHtml(box.id)}">
+            </label>
             <span>${rows.length}件${preview ? ` / ${escapeHtml(preview)}` : ''}</span>
-          </button>
+          </div>
           <button type="button" class="assignment-box-delete" data-assignment-box-delete="${escapeHtml(box.id)}">
             <span class="material-symbols-outlined">close</span>
           </button>
@@ -739,6 +813,9 @@ function renderAssignmentBoxes() {
       `;
     })
     .join('');
+  lists.forEach((list) => {
+    list.innerHTML = html;
+  });
 }
 
 function renderAssignmentConfirmSummary() {
@@ -753,7 +830,7 @@ function renderAssignmentConfirmSummary() {
     .filter((box) => box.rows.length);
 
   if (!boxes.length) {
-    elements.assignmentConfirmSummary.innerHTML = '<p class="empty-text">箱に符号を入れると、ここで登録内容を確認できます。</p>';
+    elements.assignmentConfirmSummary.innerHTML = '<p class="empty-text">新手配書番号に符号を入れると、ここで登録内容を確認できます。</p>';
     return;
   }
 
@@ -1587,11 +1664,11 @@ async function applyAssignmentBoxes() {
     return;
   }
   if (!boxes.length) {
-    showToast('登録する箱がありません。', 'error');
+    showToast('登録する新手配書番号がありません。', 'error');
     return;
   }
 
-  setBusy('saving', '箱の内容を登録しています。');
+  setBusy('saving', '新手配書番号の内容を登録しています。');
   try {
     let latestResponse = null;
     for (const box of boxes) {
@@ -1633,12 +1710,12 @@ async function applyAssignmentBoxes() {
     await refreshProjects();
     await loadAssignmentSymbols({ silent: true });
     const movedCount = boxes.reduce((sum, box) => sum + box.symbolIds.length, 0);
-    const message = `${boxes.length}個の箱、${movedCount}件の符号を登録しました。`;
+    const message = `${boxes.length}個の新手配書番号、${movedCount}件の符号を登録しました。`;
     setStatus(message);
     showToast(message, 'success');
   } catch (error) {
     console.error(error);
-    const message = `箱の登録に失敗しました: ${error.message}`;
+    const message = `新手配書番号の登録に失敗しました: ${error.message}`;
     setStatus(message);
     showToast(message, 'error');
   }
@@ -1914,14 +1991,7 @@ function bindEvents() {
     void loadAssignmentSymbols();
   });
   elements.addAssignmentBoxButton?.addEventListener('click', () => {
-    const box = createAssignmentBox(state.assignment.targetDrawingNumber);
-    if (!box) {
-      showToast('箱の手配書Noを入力してください。', 'error');
-      elements.assignmentTargetDrawingInput?.focus();
-      return;
-    }
-    renderAssignmentBoxes();
-    renderAssignmentWizard();
+    createAssignmentBoxesFromControls();
   });
   elements.addSelectionToBoxButton?.addEventListener('click', () => {
     addRowsToAssignmentBox(state.assignment.selectedDocIds);
@@ -1954,25 +2024,66 @@ function bindEvents() {
   elements.assignmentTargetDrawingInput.addEventListener('input', () => {
     state.assignment.targetDrawingNumber = elements.assignmentTargetDrawingInput.value;
   });
-  elements.assignmentBoxesList?.addEventListener('click', (event) => {
-    const selectButton = event.target.closest('[data-assignment-box-select]');
-    if (selectButton) {
-      const box = state.assignment.boxes.find((item) => item.id === selectButton.dataset.assignmentBoxSelect);
-      if (box) {
-        state.assignment.activeBoxId = box.id;
-        state.assignment.targetDrawingNumber = box.targetDrawingNumber;
-        if (elements.assignmentTargetDrawingInput) {
-          elements.assignmentTargetDrawingInput.value = box.targetDrawingNumber;
-        }
-        renderAssignmentBoxes();
-        renderAssignmentWizard();
+  elements.assignmentBoxesLists.forEach((boxList) => {
+    boxList.addEventListener('click', (event) => {
+      if (event.target.closest('[data-assignment-box-name]')) {
+        return;
       }
-      return;
-    }
-    const deleteButton = event.target.closest('[data-assignment-box-delete]');
-    if (deleteButton) {
-      removeAssignmentBox(deleteButton.dataset.assignmentBoxDelete);
-    }
+      const selectButton = event.target.closest('[data-assignment-box-select]');
+      if (selectButton) {
+        const box = state.assignment.boxes.find((item) => item.id === selectButton.dataset.assignmentBoxSelect);
+        if (box) {
+          state.assignment.activeBoxId = box.id;
+          state.assignment.targetDrawingNumber = box.targetDrawingNumber;
+          if (elements.assignmentTargetDrawingInput) {
+            elements.assignmentTargetDrawingInput.value = box.targetDrawingNumber;
+          }
+          renderAssignmentBoxes();
+          renderAssignmentWizard();
+        }
+        return;
+      }
+      const deleteButton = event.target.closest('[data-assignment-box-delete]');
+      if (deleteButton) {
+        removeAssignmentBox(deleteButton.dataset.assignmentBoxDelete);
+      }
+    });
+    boxList.addEventListener('input', (event) => {
+      const input = event.target.closest('[data-assignment-box-name]');
+      if (!input) {
+        return;
+      }
+      const box = state.assignment.boxes.find((item) => item.id === input.dataset.assignmentBoxName);
+      if (!box) {
+        return;
+      }
+      box.targetDrawingNumber = input.value;
+      state.assignment.activeBoxId = box.id;
+      state.assignment.targetDrawingNumber = input.value;
+      renderAssignmentWizard();
+    });
+    boxList.addEventListener('dragover', (event) => {
+      const dropTarget = event.target.closest('[data-assignment-box-drop]');
+      if (!dropTarget) {
+        return;
+      }
+      event.preventDefault();
+      dropTarget.classList.add('is-drop-target');
+    });
+    boxList.addEventListener('dragleave', (event) => {
+      event.target.closest('[data-assignment-box-drop]')?.classList.remove('is-drop-target');
+    });
+    boxList.addEventListener('drop', (event) => {
+      const dropTarget = event.target.closest('[data-assignment-box-drop]');
+      if (!dropTarget) {
+        return;
+      }
+      event.preventDefault();
+      dropTarget.classList.remove('is-drop-target');
+      const rowKey = event.dataTransfer?.getData('text/plain');
+      const box = state.assignment.boxes.find((item) => item.id === dropTarget.dataset.assignmentBoxDrop);
+      addRowsToSpecificAssignmentBox(rowKey ? [rowKey] : [], box);
+    });
   });
   elements.assignmentSymbolsList.addEventListener('click', (event) => {
     const toggleButton = event.target.closest('[data-assignment-toggle]');
@@ -1986,6 +2097,14 @@ function bindEvents() {
       state.assignment.collapsedGroupKeys.add(key);
     }
     renderAssignmentList();
+  });
+  elements.assignmentSymbolsList.addEventListener('dragstart', (event) => {
+    const row = event.target.closest('[data-assignment-drag-row]');
+    if (!row) {
+      return;
+    }
+    event.dataTransfer?.setData('text/plain', row.dataset.assignmentDragRow || '');
+    event.dataTransfer.effectAllowed = 'move';
   });
   elements.assignmentDrawingTabs?.addEventListener('click', (event) => {
     const tab = event.target.closest('[data-assignment-tab]');

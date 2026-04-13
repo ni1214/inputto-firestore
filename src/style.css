@@ -519,6 +519,17 @@ h4 {
   gap: 10px;
 }
 
+.assignment-symbol-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.assignment-drop-dock {
+  align-content: start;
+}
+
 .assignment-boxes {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -541,6 +552,11 @@ h4 {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), 0 14px 28px rgba(37, 99, 235, 0.12);
 }
 
+.assignment-box.is-drop-target {
+  border-color: #16a34a;
+  background: #f1fff6;
+}
+
 .assignment-box-main,
 .assignment-box-delete {
   border: 0;
@@ -557,11 +573,32 @@ h4 {
   color: var(--text);
 }
 
-.assignment-box-main strong {
-  font-size: 1.15rem;
+.assignment-box-main label {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  cursor: text;
 }
 
-.assignment-box-main span {
+.assignment-box-main label span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.assignment-box-main input {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.assignment-box-main > span {
   color: var(--muted);
   font-weight: 700;
 }
@@ -1146,6 +1183,10 @@ h4 {
   .assignment-controls > button,
   .assignment-controls .inline-field {
     width: 100%;
+  }
+
+  .assignment-symbol-workspace {
+    grid-template-columns: 1fr;
   }
 
   .assignment-row {
