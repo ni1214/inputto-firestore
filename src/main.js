@@ -578,20 +578,32 @@ function scheduleAutoSave() {
 
 async function applyBulkSymbols() {
   const symbols = parseBulkSymbols(elements.bulkSymbolsInput?.value || '');
+  applyBulkSymbolsToRows(symbols, { clearInput: true, notify: true });
+}
+
+function applyBulkSymbolsToRows(symbols, options = {}) {
+  const { clearInput = false, notify = false } = options;
   syncProjectFromForm();
   syncDrawingFromForm();
   if (!symbols.length && !state.selectedDrawingId) {
-    setStatus('追加する符号がありません。');
-    return;
+    if (notify) {
+      setStatus('追加する符号がありません。');
+      showToast('追加する符号がありません。', 'error');
+    }
+    return false;
   }
 
   if (!state.project.c2 || !state.project.projectName) {
-    showToast('先に工事を入れてください。', 'error');
-    return;
+    if (notify) {
+      showToast('先に工事を入れてください。', 'error');
+    }
+    return false;
   }
   if (!state.drawing.drawingNumber) {
-    showToast('先に手配書Noを入れてください。', 'error');
-    return;
+    if (notify) {
+      showToast('先に手配書Noを入れてください。', 'error');
+    }
+    return false;
   }
 
   const existingRows = getMeaningfulRows();
@@ -610,12 +622,15 @@ async function applyBulkSymbols() {
   state.rows = nextRows.length ? nextRows : [createUiRow()];
   state.selectedRowIds = new Set();
   renderRows();
-  if (elements.bulkSymbolsInput) {
+  if (clearInput && elements.bulkSymbolsInput) {
     elements.bulkSymbolsInput.value = '';
   }
-  setStatus(`${symbols.length}件の符号を反映しました。登録ボタンで保存できます。`);
-  showToast(`${symbols.length}件の符号を反映しました。登録で保存できます。`, 'success');
+  if (notify) {
+    setStatus(`${symbols.length}件の符号を登録準備しました。登録ボタンで保存できます。`);
+    showToast(`${symbols.length}件の符号を登録準備しました。`, 'success');
+  }
   scheduleAutoSave();
+  return true;
 }
 
 function clearBulkSymbols() {
@@ -959,10 +974,31 @@ function clearProjectState() {
   clearAutoSaveTimer();
   state.project = { ...PROJECT_TEMPLATE };
   state.drawings = [];
+  state.filterText = '';
   resetDrawingState();
   resetAssignmentState();
   syncSavedSignature();
   renderAll();
+}
+
+function clearDirectFormValues() {
+  [
+    elements.projectC2Input,
+    elements.projectNameInput,
+    elements.projectShortNameInput,
+    elements.projectContactInput,
+    elements.drawingNumberInput,
+    elements.drawingStatusInput,
+    elements.bulkSymbolsInput,
+    elements.filterInput,
+    elements.assignmentFilterInput,
+    elements.assignmentTargetDrawingInput,
+    elements.pdfFileInput
+  ].forEach((input) => {
+    if (input) {
+      input.value = '';
+    }
+  });
 }
 
 async function selectProject(c2) {
@@ -1136,6 +1172,10 @@ async function saveCurrent(options = {}) {
   const { auto = false, resetAfterSave = !auto } = options;
   syncProjectFromForm();
   syncDrawingFromForm();
+  const bulkSymbols = parseBulkSymbols(elements.bulkSymbolsInput?.value || '');
+  if (!auto && state.activeMode === 'register' && bulkSymbols.length) {
+    applyBulkSymbolsToRows(bulkSymbols);
+  }
 
   if (!canAutoSave()) {
     if (!auto) {
@@ -1214,7 +1254,17 @@ function startNewProject() {
   if (elements.assignmentProjectSelect) {
     elements.assignmentProjectSelect.value = '';
   }
-  updateFormInputs();
+  state.search.projectC2 = '';
+  state.search.cacheProjectC2 = '';
+  state.search.cacheRows = [];
+  state.search.results = [];
+  state.search.resultCountText = '0件';
+  state.search.hint = '検索結果はここに表示されます。';
+  clearDirectFormValues();
+  resetAppDropState();
+  setPdfAnalysisBusy(false);
+  renderAll();
+  clearDirectFormValues();
   renderAssignmentList();
   setActiveMode('register');
   elements.projectC2Input.focus();
@@ -1425,7 +1475,7 @@ function bindEvents() {
     });
     renderAssignmentList();
   });
-  elements.applyBulkSymbolsButton.addEventListener('click', applyBulkSymbols);
+  elements.applyBulkSymbolsButton?.addEventListener('click', applyBulkSymbols);
   elements.clearBulkSymbolsButton.addEventListener('click', clearBulkSymbols);
   elements.addRowButton.addEventListener('click', addRow);
   elements.duplicateRowButton.addEventListener('click', duplicateSelectedRows);
