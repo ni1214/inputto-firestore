@@ -496,6 +496,12 @@ function getVisibleAssignmentRows() {
   });
 }
 
+function getScopedAssignmentRows() {
+  const groups = getAssignmentGroups();
+  const activeGroupKeys = getActiveAssignmentGroupKeys(groups);
+  return state.assignment.rows.filter((row) => activeGroupKeys.has(row.drawingId || '__unassigned'));
+}
+
 function getAssignmentSelectionKey(row) {
   return [
     row.docId || '',
@@ -655,14 +661,16 @@ function getAssignmentBoxForRowKeyIncludingRemainder(rowKey) {
   if (explicitBox) {
     return explicitBox;
   }
-  return getRemainderAssignmentBox();
+  const scopedKeys = new Set(getScopedAssignmentRows().map(getAssignmentSelectionKey));
+  return scopedKeys.has(rowKey) ? getRemainderAssignmentBox() : null;
 }
 
 function getEffectiveAssignmentRowsForBox(box) {
   if (!box) {
     return [];
   }
-  const rows = getAssignmentRowsForKeys(box.rowKeys || []);
+  const scopedKeys = new Set(getScopedAssignmentRows().map(getAssignmentSelectionKey));
+  const rows = getAssignmentRowsForKeys(box.rowKeys || []).filter((row) => scopedKeys.has(getAssignmentSelectionKey(row)));
   if (box.id !== getRemainderAssignmentBox()?.id) {
     return rows;
   }
@@ -673,7 +681,7 @@ function getEffectiveAssignmentRowsForBox(box) {
     }
   });
   const ownKeys = new Set(Array.from(box.rowKeys || []));
-  const remainderRows = state.assignment.rows.filter((row) => {
+  const remainderRows = getScopedAssignmentRows().filter((row) => {
     const rowKey = getAssignmentSelectionKey(row);
     return !explicitKeys.has(rowKey) || ownKeys.has(rowKey);
   });
