@@ -221,6 +221,16 @@ function setAssignmentStep(step, options = {}) {
   return true;
 }
 
+async function navigateAssignmentStep(step) {
+  const changed = setAssignmentStep(step);
+  if (!changed) {
+    return;
+  }
+  if (step === 'load' && state.project.c2 && !state.assignment.rows.length) {
+    await loadAssignmentSymbols();
+  }
+}
+
 function getAiLogicSetupUrl(message) {
   const matched = String(message || '').match(/https:\/\/console\.firebase\.google\.com\/project\/[^\s]+\/ailogic\/?/);
   return matched ? matched[0] : '';
@@ -390,26 +400,37 @@ function renderDrawingTabs() {
     elements.assignmentDrawingTabs.innerHTML = '<p class="empty-text">工事を選ぶと手配書タブが出ます。</p>';
     return;
   }
-  if (!state.drawings.length) {
-    elements.assignmentDrawingTabs.innerHTML = '<p class="empty-text">まだ登録済みの手配書がありません。</p>';
+  if (!state.assignment.rows.length) {
+    elements.assignmentDrawingTabs.innerHTML = '<p class="empty-text">登録済み符号を読み込んでいます。</p>';
     return;
   }
 
-  const activeGroupKeys = getActiveAssignmentGroupKeys();
-  const allActive = state.drawings.length > 0 && state.drawings.every((drawing) => activeGroupKeys.has(drawing.id)) ? ' is-active' : '';
+  const groups = getAssignmentGroups();
+  const activeGroupKeys = getActiveAssignmentGroupKeys(groups);
+  const allActive = groups.length > 0 && groups.every((group) => activeGroupKeys.has(group.key)) ? ' is-active' : '';
+  const allPreview = state.assignment.rows
+    .slice(0, 8)
+    .map((row) => row.symbol)
+    .filter(Boolean)
+    .join('、');
   const tabs = [
     `
-      <button type="button" class="drawing-chip${allActive}" data-assignment-tab="${ASSIGNMENT_ALL_GROUP}">
+      <button type="button" class="drawing-chip assignment-tab-chip${allActive}" data-assignment-tab="${ASSIGNMENT_ALL_GROUP}">
         <span>全て</span>
-        <small>${state.drawings.reduce((sum, drawing) => sum + Number(drawing.rowCount || 0), 0)}件</small>
+        <small>${state.assignment.rows.length}件${allPreview ? ` / ${escapeHtml(allPreview)}` : ''}</small>
       </button>
     `,
-    ...state.drawings.map((drawing) => {
-      const active = activeGroupKeys.has(drawing.id) ? ' is-active' : '';
+    ...groups.map((group) => {
+      const active = activeGroupKeys.has(group.key) ? ' is-active' : '';
+      const preview = group.rows
+        .slice(0, 8)
+        .map((row) => row.symbol)
+        .filter(Boolean)
+        .join('、');
       return `
-        <button type="button" class="drawing-chip${active}" data-assignment-tab="${escapeHtml(drawing.id)}">
-          <span>${escapeHtml(drawing.drawingNumber || '-')}</span>
-          <small>${escapeHtml(String(drawing.rowCount || 0))}件</small>
+        <button type="button" class="drawing-chip assignment-tab-chip${active}" data-assignment-tab="${escapeHtml(group.key)}">
+          <span>${escapeHtml(group.drawingNumber || '-')}</span>
+          <small>${group.rows.length}件${preview ? ` / ${escapeHtml(preview)}` : ''}</small>
         </button>
       `;
     })
@@ -1474,9 +1495,6 @@ async function loadAssignmentSymbols(options = {}) {
     renderAssignmentList();
     renderAssignmentBoxes();
     renderAssignmentHistory();
-    if (!silent && rows.length) {
-      state.assignment.step = 'boxes';
-    }
     renderAssignmentWizard();
     if (!silent) {
       setStatus(`${state.assignment.rows.length}件の登録済み符号を読み込みました。`);
@@ -1853,13 +1871,13 @@ function bindEvents() {
 
   elements.assignmentStepButtons.forEach((button) => {
     button.addEventListener('click', () => {
-      setAssignmentStep(button.dataset.assignmentStep);
+      void navigateAssignmentStep(button.dataset.assignmentStep);
     });
   });
 
   document.querySelectorAll('[data-assignment-next]').forEach((button) => {
     button.addEventListener('click', () => {
-      setAssignmentStep(button.dataset.assignmentNext);
+      void navigateAssignmentStep(button.dataset.assignmentNext);
     });
   });
 
@@ -1874,9 +1892,6 @@ function bindEvents() {
   });
   elements.assignmentProjectSelect?.addEventListener('change', async () => {
     await selectProject(elements.assignmentProjectSelect.value);
-    if (state.project.c2) {
-      setAssignmentStep('load', { silent: true });
-    }
     renderAssignmentList();
   });
   elements.reportProjectSelect?.addEventListener('change', async () => {
@@ -1895,7 +1910,7 @@ function bindEvents() {
   elements.reportRegisterButton?.addEventListener('click', () => {
     void saveCurrent({ resetAfterSave: false });
   });
-  elements.loadAssignmentButton.addEventListener('click', () => {
+  elements.loadAssignmentButton?.addEventListener('click', () => {
     void loadAssignmentSymbols();
   });
   elements.addAssignmentBoxButton?.addEventListener('click', () => {
@@ -1979,7 +1994,7 @@ function bindEvents() {
     }
     const key = tab.dataset.assignmentTab || '';
     if (key === ASSIGNMENT_ALL_GROUP) {
-      state.assignment.activeGroupKeys = new Set(state.drawings.map((drawing) => drawing.id).filter(Boolean));
+      state.assignment.activeGroupKeys = new Set(getAssignmentGroups().map((group) => group.key));
     } else if (state.assignment.activeGroupKeys.has(key)) {
       state.assignment.activeGroupKeys.delete(key);
       if (!state.assignment.activeGroupKeys.size) {

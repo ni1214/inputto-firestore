@@ -385,6 +385,25 @@ h4 {
   color: rgba(255, 255, 255, 0.82);
 }
 
+.assignment-tabs {
+  display: grid;
+  gap: 10px;
+}
+
+.assignment-tab-chip {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(4.5rem, auto) minmax(0, 1fr);
+  justify-content: stretch;
+  text-align: left;
+}
+
+.assignment-tab-chip small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .assignment-workflow {
   min-height: calc(100vh - 48px);
   grid-template-rows: auto auto minmax(0, 1fr);
