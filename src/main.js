@@ -414,6 +414,28 @@ function getVisibleAssignmentRows() {
   });
 }
 
+function getAssignmentSelectionKey(row) {
+  return [
+    row.docId || '',
+    row.drawingId || '',
+    row.drawingNumber || '',
+    row.symbolN || normalizeText(row.symbol),
+    row.uiId || ''
+  ].join('__');
+}
+
+function getSelectedAssignmentDocIds() {
+  const selectedKeys = state.assignment.selectedDocIds;
+  return Array.from(
+    new Set(
+      state.assignment.rows
+        .filter((row) => selectedKeys.has(getAssignmentSelectionKey(row)))
+        .map((row) => row.docId)
+        .filter(Boolean)
+    )
+  );
+}
+
 function renderAssignmentList() {
   if (!elements.assignmentSymbolsList) {
     return;
@@ -462,11 +484,12 @@ function renderAssignmentList() {
       const collapsed = !filtering && state.assignment.collapsedGroupKeys.has(group.key);
       const rows = group.rows
         .map((row) => {
-          const checked = state.assignment.selectedDocIds.has(row.docId) ? ' checked' : '';
+          const rowKey = getAssignmentSelectionKey(row);
+          const checked = state.assignment.selectedDocIds.has(rowKey) ? ' checked' : '';
           const detail = [row.name, row.floor, row.insideOutside].filter(Boolean).join(' / ');
           return `
             <label class="assignment-row">
-              <input type="checkbox" data-assignment-symbol="${escapeHtml(row.docId)}"${checked}>
+              <input type="checkbox" data-assignment-symbol="${escapeHtml(rowKey)}"${checked}>
               <span class="assignment-symbol">${escapeHtml(row.symbol || '-')}</span>
               <small>${escapeHtml(detail)}</small>
             </label>
@@ -1223,8 +1246,8 @@ async function loadAssignmentSymbols(options = {}) {
     state.assignment.history = history;
     getActiveAssignmentGroupKeys(getAssignmentGroups());
     state.assignment.selectedDocIds = new Set(
-      Array.from(state.assignment.selectedDocIds).filter((docId) =>
-        state.assignment.rows.some((row) => row.docId === docId)
+      Array.from(state.assignment.selectedDocIds).filter((rowKey) =>
+        state.assignment.rows.some((row) => getAssignmentSelectionKey(row) === rowKey)
       )
     );
     renderAssignmentList();
@@ -1244,7 +1267,7 @@ async function moveSelectedAssignmentSymbols() {
   syncProjectFromForm();
   syncDrawingFromForm();
   const targetDrawingNumber = String(state.assignment.targetDrawingNumber || '').trim();
-  const selectedIds = Array.from(state.assignment.selectedDocIds);
+  const selectedIds = getSelectedAssignmentDocIds();
 
   if (!state.project.c2 || !state.project.projectName) {
     showToast('先に工事を選んでください。', 'error');
@@ -1561,7 +1584,7 @@ function bindEvents() {
     void moveSelectedAssignmentSymbols();
   });
   elements.selectAllAssignmentButton.addEventListener('click', () => {
-    state.assignment.selectedDocIds = new Set(getVisibleAssignmentRows().map((row) => row.docId).filter(Boolean));
+    state.assignment.selectedDocIds = new Set(getVisibleAssignmentRows().map(getAssignmentSelectionKey));
     renderAssignmentList();
   });
   elements.clearAssignmentSelectionButton.addEventListener('click', () => {
@@ -1612,37 +1635,16 @@ function bindEvents() {
   elements.assignmentSymbolsList.addEventListener('change', (event) => {
     const symbolCheckbox = event.target.closest('[data-assignment-symbol]');
     if (symbolCheckbox) {
-      const docId = symbolCheckbox.dataset.assignmentSymbol;
+      const rowKey = symbolCheckbox.dataset.assignmentSymbol;
       if (symbolCheckbox.checked) {
-        state.assignment.selectedDocIds.add(docId);
+        state.assignment.selectedDocIds.add(rowKey);
       } else {
-        state.assignment.selectedDocIds.delete(docId);
+        state.assignment.selectedDocIds.delete(rowKey);
       }
       renderAssignmentList();
       return;
     }
 
-    const groupCheckbox = event.target.closest('[data-assignment-group]');
-    if (!groupCheckbox) {
-      return;
-    }
-    const groupRows = getVisibleAssignmentRows().filter(
-      (row) => (row.drawingId || '__unassigned') === groupCheckbox.dataset.assignmentGroup
-    );
-    if (!groupRows.length) {
-      return;
-    }
-    groupRows.forEach((row) => {
-      if (!row.docId) {
-        return;
-      }
-      if (groupCheckbox.checked) {
-        state.assignment.selectedDocIds.add(row.docId);
-      } else {
-        state.assignment.selectedDocIds.delete(row.docId);
-      }
-    });
-    renderAssignmentList();
   });
   elements.applyBulkSymbolsButton?.addEventListener('click', applyBulkSymbols);
   elements.clearBulkSymbolsButton.addEventListener('click', clearBulkSymbols);
