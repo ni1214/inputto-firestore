@@ -1,7 +1,6 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
 import { assignSymbolsToDrawing, listProjects, loadAssignmentHistory, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
-import { extractHandaiDataFromPdf } from './gemini.js';
 
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
@@ -41,6 +40,22 @@ const ROW_EDITOR_GROUPS = [
   }
 ];
 
+const ROW_EDITOR_SCOPE_OPTIONS = ['枠', '扉', '枠扉'];
+const ROW_EDITOR_FINISH_OPTIONS = ['錆止め', '焼付'];
+const ROW_EDITOR_FRAME_DATE_KEYS = ['draftFrameAt', 'assemblyFrameCompletedAt', 'frameShipDate'];
+const ROW_EDITOR_DOOR_DATE_KEYS = ['draftDoorAt', 'assemblyDoorCompletedAt', 'doorShipDate'];
+const ROW_EDITOR_GUIDED_FIELD_KEYS = new Set([
+  'symbol',
+  'name',
+  'floor',
+  'insideOutside',
+  'labelCount',
+  'bakeColor',
+  'draftAssignee',
+  ...ROW_EDITOR_FRAME_DATE_KEYS,
+  ...ROW_EDITOR_DOOR_DATE_KEYS
+]);
+
 const state = {
   env: 'production',
   activeMode: normalizeMode(localStorage.getItem(MODE_STORAGE_KEY)),
@@ -60,7 +75,9 @@ const state = {
   rowEditor: {
     open: false,
     rowId: '',
-    rowIds: []
+    rowIds: [],
+    guideByRowId: Object.create(null),
+    detailsOpen: false
   },
   assignment: {
     rows: [],
@@ -178,6 +195,466 @@ let autoSaveTimerId = null;
 let lastSavedSignature = '';
 let appDragDepth = 0;
 const FIELD_DEF_MAP = new Map(FIELD_DEFS.map((field) => [field.key, field]));
+let geminiModulePromise = null;
+
+function loadGeminiModule() {
+  if (!geminiModulePromise) {
+    geminiModulePromise = import('./gemini.js');
+  }
+  return geminiModulePromise;
+}
+
+function normalizeRowEditorScope(value) {
+  const text = String(value || '')
+    .normalize('NFKC')
+    .trim();
+  if (!text) {
+    return '';
+  }
+  if (text.includes('枠扉') || text.includes('両方')) {
+    return '枠扉';
+  }
+  if (text.includes('枠')) {
+    return '枠';
+  }
+  if (text.includes('扉')) {
+    return '扉';
+  }
+  return '';
+}
+
+function normalizeRowEditorFinishMode(value) {
+  const text = String(value || '')
+    .normalize('NFKC')
+    .trim();
+  if (!text) {
+    return '';
+  }
+  if (text.includes('焼')) {
+    return '焼付';
+  }
+  if (text.includes('錆')) {
+    return '錆止め';
+  }
+  return text;
+}
+
+function deriveRowEditorScope(row) {
+  const hasFrameDates = ROW_EDITOR_FRAME_DATE_KEYS.some((key) => String(row[key] || '').trim());
+  const hasDoorDates = ROW_EDITOR_DOOR_DATE_KEYS.some((key) => String(row[key] || '').trim());
+  if (hasFrameDates && hasDoorDates) {
+    return '枠扉';
+  }
+  if (hasFrameDates) {
+    return '枠';
+  }
+  if (hasDoorDates) {
+    return '扉';
+  }
+  return '';
+}
+
+function deriveRowEditorFinishMode(row) {
+  return String(row.bakeColor || '').trim() ? '焼付' : '';
+}
+
+function getRowEditorGuideState(row) {
+  const rowId = row?.uiId || '';
+  if (!rowId) {
+    return { scope: '', finishMode: '', activeKey: '' };
+  }
+
+  if (!state.rowEditor.guideByRowId[rowId]) {
+    state.rowEditor.guideByRowId[rowId] = {
+      scope: deriveRowEditorScope(row),
+      finishMode: deriveRowEditorFinishMode(row),
+      activeKey: ''
+    };
+  } else {
+    const guideState = state.rowEditor.guideByRowId[rowId];
+    if (!guideState.scope) {
+      guideState.scope = deriveRowEditorScope(row);
+    }
+    if (!guideState.finishMode) {
+      guideState.finishMode = deriveRowEditorFinishMode(row);
+    }
+    if (typeof guideState.activeKey !== 'string') {
+      guideState.activeKey = '';
+    }
+  }
+
+  return state.rowEditor.guideByRowId[rowId];
+}
+
+function getRowEditorGuideStepValue(step, row, guideState) {
+  if (step.key === 'scope') {
+    return normalizeRowEditorScope(guideState.scope || deriveRowEditorScope(row));
+  }
+  if (step.key === 'finishMode') {
+    return normalizeRowEditorFinishMode(guideState.finishMode || deriveRowEditorFinishMode(row));
+  }
+  return String(row?.[step.fieldKey] || '').trim();
+}
+
+function getRowEditorGuideStepPrompt(step, guideState) {
+  if (step.key === 'draftFrameAt') {
+    return '枠のバラ図日は？';
+  }
+  if (step.key === 'draftDoorAt') {
+    return '扉のバラ図日は？';
+  }
+  if (step.key === 'assemblyFrameCompletedAt') {
+    return '枠の組立完了日は？';
+  }
+  if (step.key === 'assemblyDoorCompletedAt') {
+    return '扉の組立完了日は？';
+  }
+  if (step.key === 'frameShipDate') {
+    return '枠の出荷日は？';
+  }
+  if (step.key === 'doorShipDate') {
+    return '扉の出荷日は？';
+  }
+  if (step.key === 'bakeColor' && normalizeRowEditorFinishMode(guideState.finishMode) === '焼付') {
+    return '焼付色は？';
+  }
+  return step.prompt;
+}
+
+function isRowEditorGuideStepComplete(step, row, guideState) {
+  if (step.key === 'scope') {
+    return Boolean(getRowEditorGuideStepValue(step, row, guideState));
+  }
+  if (step.key === 'finishMode') {
+    return Boolean(getRowEditorGuideStepValue(step, row, guideState));
+  }
+  if (step.key === 'bakeColor') {
+    return normalizeRowEditorFinishMode(guideState.finishMode || deriveRowEditorFinishMode(row)) !== '焼付' || Boolean(getRowEditorGuideStepValue(step, row, guideState));
+  }
+  return Boolean(getRowEditorGuideStepValue(step, row, guideState));
+}
+
+function getRowEditorGuideSteps(row, guideState) {
+  const scope = normalizeRowEditorScope(guideState.scope || deriveRowEditorScope(row));
+  const finishMode = normalizeRowEditorFinishMode(guideState.finishMode || deriveRowEditorFinishMode(row));
+  const steps = [
+    {
+      key: 'symbol',
+      fieldKey: 'symbol',
+      prompt: '符号は？',
+      type: 'text',
+      required: true
+    },
+    {
+      key: 'name',
+      fieldKey: 'name',
+      prompt: '品名は？',
+      type: 'text'
+    },
+    {
+      key: 'scope',
+      prompt: '枠ですか？扉ですか？枠扉ですか？',
+      type: 'choice',
+      options: ROW_EDITOR_SCOPE_OPTIONS,
+      help: '枠を選ぶと扉の日程は省きます。'
+    },
+    {
+      key: 'floor',
+      fieldKey: 'floor',
+      prompt: 'フロアは？',
+      type: 'text'
+    },
+    {
+      key: 'insideOutside',
+      fieldKey: 'insideOutside',
+      prompt: '内外は？',
+      type: 'text'
+    },
+    {
+      key: 'labelCount',
+      fieldKey: 'labelCount',
+      prompt: 'ラベル何枚必要ですか？',
+      type: 'number',
+      required: true
+    },
+    {
+      key: 'finishMode',
+      prompt: '錆止めですか？焼付ですか？',
+      type: 'choice',
+      options: ROW_EDITOR_FINISH_OPTIONS,
+      help: '焼付なら色も続けて聞きます。'
+    },
+    ...(finishMode === '焼付'
+      ? [
+          {
+            key: 'bakeColor',
+            fieldKey: 'bakeColor',
+            prompt: '焼付色は？',
+            type: 'text',
+            required: true
+          }
+        ]
+      : []),
+    {
+      key: 'draftAssignee',
+      fieldKey: 'draftAssignee',
+      prompt: 'バラ図担当は？',
+      type: 'text'
+    },
+    ...(scope !== '扉'
+      ? ROW_EDITOR_FRAME_DATE_KEYS.map((fieldKey) => ({
+          key: fieldKey,
+          fieldKey,
+          prompt: getRowEditorGuideStepPrompt({ key: fieldKey }, guideState),
+          type: 'date'
+        }))
+      : []),
+    ...(scope !== '枠'
+      ? ROW_EDITOR_DOOR_DATE_KEYS.map((fieldKey) => ({
+          key: fieldKey,
+          fieldKey,
+          prompt: getRowEditorGuideStepPrompt({ key: fieldKey }, guideState),
+          type: 'date'
+        }))
+      : [])
+  ];
+
+  return steps;
+}
+
+function getRowEditorGuideStepIndex(row, guideState, steps) {
+  if (guideState.activeKey) {
+    const activeIndex = steps.findIndex((step) => step.key === guideState.activeKey);
+    if (activeIndex >= 0) {
+      return activeIndex;
+    }
+    guideState.activeKey = '';
+  }
+
+  return steps.findIndex((step) => !isRowEditorGuideStepComplete(step, row, guideState));
+}
+
+function formatRowEditorGuideValue(step, row, guideState) {
+  const value = getRowEditorGuideStepValue(step, row, guideState);
+  if (step.key === 'scope' || step.key === 'finishMode') {
+    return value || '未選択';
+  }
+  return value || '未入力';
+}
+
+function buildRowEditorGuideInput(step, row, guideState, isActive) {
+  const value = getRowEditorGuideStepValue(step, row, guideState);
+  const activeAttr = isActive ? ' data-row-editor-guide-active="true"' : '';
+
+  if (step.key === 'scope' || step.key === 'finishMode') {
+    const options = step.key === 'scope' ? ROW_EDITOR_SCOPE_OPTIONS : ROW_EDITOR_FINISH_OPTIONS;
+    return `
+      <select
+        class="row-editor-guide-input"
+        data-row-editor-guide-input="true"
+        data-row-editor-guide-choice="${escapeHtml(step.key)}"
+        data-row-editor-guide-step="${escapeHtml(step.key)}"${activeAttr}>
+        <option value="">選択してください</option>
+        ${options
+          .map((option) => `<option value="${escapeHtml(option)}"${option === value ? ' selected' : ''}>${escapeHtml(option)}</option>`)
+          .join('')}
+      </select>
+    `;
+  }
+
+  const inputType = step.type || 'text';
+  const extraAttrs = [];
+  if (inputType === 'number') {
+    extraAttrs.push('min="0"', 'step="1"');
+  }
+
+  return `
+    <input
+      class="row-editor-guide-input"
+      data-row-editor-guide-input="true"
+      data-row-editor-guide-step="${escapeHtml(step.key)}"
+      data-row-editor-field="${escapeHtml(step.fieldKey)}"
+      type="${escapeHtml(inputType)}"
+      value="${escapeHtml(value)}"
+      ${extraAttrs.join(' ')}${activeAttr}>
+  `;
+}
+
+function buildRowEditorGuideCard(step, row, guideState, activeIndex, index) {
+  const isActive = index === activeIndex;
+  const isComplete = isRowEditorGuideStepComplete(step, row, guideState);
+  const valueText = formatRowEditorGuideValue(step, row, guideState);
+
+  return `
+    <section class="row-editor-guide-step${isActive ? ' is-active' : isComplete ? ' is-complete' : ''}">
+      <div class="row-editor-guide-step-head">
+        <div class="stack-tight">
+          <p class="row-editor-guide-step-eyebrow">質問 ${index + 1}</p>
+          <strong>${escapeHtml(step.prompt)}</strong>
+        </div>
+        <div class="row-editor-guide-step-meta">
+          <span>${escapeHtml(valueText)}</span>
+          ${
+            isComplete
+              ? `<button type="button" class="ghost-button compact-button" data-row-editor-guide-edit="${escapeHtml(step.key)}">変更</button>`
+              : ''
+          }
+        </div>
+      </div>
+      ${
+        isActive
+          ? `
+            <div class="row-editor-guide-step-body">
+              <label class="field row-editor-guide-field">
+                <span>${escapeHtml(step.prompt)}</span>
+                ${buildRowEditorGuideInput(step, row, guideState, true)}
+              </label>
+              ${step.help ? `<p class="row-editor-guide-help">${escapeHtml(step.help)}</p>` : ''}
+            </div>
+          `
+          : ''
+      }
+    </section>
+  `;
+}
+
+function buildRowEditorGuideHtml(row, guideState) {
+  const steps = getRowEditorGuideSteps(row, guideState);
+  const activeIndex = getRowEditorGuideStepIndex(row, guideState, steps);
+  const completedCount = steps.filter((step) => isRowEditorGuideStepComplete(step, row, guideState)).length;
+
+  return `
+    <section class="row-editor-guide panel-soft">
+      <div class="row-editor-guide-header">
+        <div class="stack-tight">
+          <p class="mode-eyebrow">質問モード</p>
+          <h4>よく使う項目を順番に聞きます</h4>
+        </div>
+        <div class="cluster">
+          <span class="subtle">${completedCount} / ${steps.length} 完了</span>
+          <button type="button" class="ghost-button compact-button" data-row-editor-toggle-details>
+            <span class="material-symbols-outlined">tune</span>
+            <span>${state.rowEditor.detailsOpen ? '詳細を閉じる' : '詳細を開く'}</span>
+          </button>
+        </div>
+      </div>
+      <div class="row-editor-guide-list">
+        ${steps.map((step, index) => buildRowEditorGuideCard(step, row, guideState, activeIndex, index)).join('')}
+      </div>
+      <p class="row-editor-guide-note subtle">Enter で次の質問へ進めます。変更したい項目は各カードの「変更」から戻れます。</p>
+    </section>
+  `;
+}
+
+function buildRowEditorAdvancedFieldHtml(field, row) {
+  const inputType = field.type || 'text';
+  const step = inputType === 'number' ? ' step="1"' : '';
+  return `
+    <label class="field row-editor-field">
+      <span>${escapeHtml(field.label)}</span>
+      <input
+        data-row-editor-field="${escapeHtml(field.key)}"
+        type="${escapeHtml(inputType)}"
+        value="${escapeHtml(row[field.key] || '')}"${step}>
+    </label>
+  `;
+}
+
+function shouldShowAdvancedField(fieldKey, guideState) {
+  if (ROW_EDITOR_GUIDED_FIELD_KEYS.has(fieldKey)) {
+    return false;
+  }
+  const scope = normalizeRowEditorScope(guideState.scope || '');
+  if (scope === '枠' && ROW_EDITOR_DOOR_DATE_KEYS.includes(fieldKey)) {
+    return false;
+  }
+  if (scope === '扉' && ROW_EDITOR_FRAME_DATE_KEYS.includes(fieldKey)) {
+    return false;
+  }
+  return true;
+}
+
+function buildRowEditorAdvancedHtml(row, guideState) {
+  const groupsHtml = ROW_EDITOR_GROUPS
+    .map((group) => {
+      const fields = group.keys
+        .map((key) => FIELD_DEF_MAP.get(key))
+        .filter((field) => field && shouldShowAdvancedField(field.key, guideState))
+        .map((field) => buildRowEditorAdvancedFieldHtml(field, row))
+        .join('');
+
+      if (!fields) {
+        return '';
+      }
+
+      return `
+        <section class="row-editor-section">
+          <div class="section-head">
+            <h4>${escapeHtml(group.title)}</h4>
+          </div>
+          <div class="row-editor-fields">
+            ${fields}
+          </div>
+        </section>
+      `;
+    })
+    .filter(Boolean)
+    .join('');
+
+  if (!groupsHtml) {
+    return '<p class="empty-text">詳細項目はありません。</p>';
+  }
+
+  return `
+    <section class="row-editor-details stack-lg">
+      <div class="section-head">
+        <h4>詳細項目</h4>
+      </div>
+      ${groupsHtml}
+    </section>
+  `;
+}
+
+function resetRowEditorState() {
+  state.rowEditor = {
+    open: false,
+    rowId: '',
+    rowIds: [],
+    guideByRowId: Object.create(null),
+    detailsOpen: false
+  };
+}
+
+function syncRowEditorGuideChoice(row, stepKey, value) {
+  const guideState = getRowEditorGuideState(row);
+  const normalized = String(value || '').trim();
+  guideState[stepKey] = normalized;
+  guideState.activeKey = '';
+
+  if (stepKey === 'scope') {
+    if (normalized === '枠') {
+      ROW_EDITOR_DOOR_DATE_KEYS.forEach((fieldKey) => {
+        row[fieldKey] = '';
+      });
+    } else if (normalized === '扉') {
+      ROW_EDITOR_FRAME_DATE_KEYS.forEach((fieldKey) => {
+        row[fieldKey] = '';
+      });
+    }
+  }
+
+  if (stepKey === 'finishMode' && normalized !== '焼付') {
+    row.bakeColor = '';
+  }
+
+  renderRows();
+}
+
+function syncRowEditorGuideSelection(row, stepKey) {
+  const guideState = getRowEditorGuideState(row);
+  guideState.activeKey = stepKey;
+  renderRows();
+}
 
 function createUiRow(overrides = {}) {
   return {
@@ -1157,6 +1634,20 @@ function updateRowEditorLauncher() {
 }
 
 function focusRowEditorInput() {
+  const activeGuideInput = elements.rowEditorForm?.querySelector('[data-row-editor-guide-active="true"]');
+  if (activeGuideInput) {
+    activeGuideInput.focus();
+    activeGuideInput.select?.();
+    return;
+  }
+
+  const firstGuideInput = elements.rowEditorForm?.querySelector('[data-row-editor-guide-input="true"]');
+  if (firstGuideInput) {
+    firstGuideInput.focus();
+    firstGuideInput.select?.();
+    return;
+  }
+
   const modalInputs = Array.from(elements.rowEditorForm?.querySelectorAll('[data-row-editor-field]') || []);
   const target = modalInputs.find((input) => !String(input.value || '').trim()) || modalInputs[0];
   target?.focus();
@@ -1164,9 +1655,7 @@ function focusRowEditorInput() {
 }
 
 function closeRowEditor({ restoreFocus = false } = {}) {
-  state.rowEditor.open = false;
-  state.rowEditor.rowId = '';
-  state.rowEditor.rowIds = [];
+  resetRowEditorState();
   document.body.classList.remove('is-modal-open');
   if (elements.rowEditorOverlay) {
     elements.rowEditorOverlay.classList.remove('is-active');
@@ -1187,6 +1676,11 @@ function openRowEditor(rowId = '') {
   state.rowEditor.open = true;
   state.rowEditor.rowIds = rowIds;
   state.rowEditor.rowId = rowId && rowIds.includes(rowId) ? rowId : rowIds[0];
+  state.rowEditor.detailsOpen = false;
+  const currentRow = getRowEditorRow();
+  if (currentRow) {
+    getRowEditorGuideState(currentRow);
+  }
   renderRowEditor();
 }
 
@@ -1206,7 +1700,50 @@ function moveRowEditor(offset) {
   renderRows();
 }
 
+function renderRowEditorQuestionnaire() {
+  if (!elements.rowEditorOverlay || !elements.rowEditorForm || !elements.rowEditorTitle || !elements.rowEditorMeta) {
+    return false;
+  }
+
+  updateRowEditorLauncher();
+
+  if (!state.rowEditor.open) {
+    elements.rowEditorOverlay.classList.remove('is-active');
+    elements.rowEditorOverlay.hidden = true;
+    return true;
+  }
+
+  state.rowEditor.rowIds = state.rowEditor.rowIds.filter((rowId) => state.rows.some((row) => row.uiId === rowId));
+  const row = getRowEditorRow();
+  if (!row || !state.rowEditor.rowIds.length) {
+    closeRowEditor();
+    return true;
+  }
+
+  const currentIndex = Math.max(0, state.rowEditor.rowIds.indexOf(row.uiId));
+  const guideState = getRowEditorGuideState(row);
+  const guideHtml = buildRowEditorGuideHtml(row, guideState);
+  const advancedHtml = state.rowEditor.detailsOpen ? buildRowEditorAdvancedHtml(row, guideState) : '';
+
+  elements.rowEditorTitle.textContent = row.symbol ? `${row.symbol} を質問入力` : `符号 ${currentIndex + 1} を質問入力`;
+  elements.rowEditorMeta.textContent = `${currentIndex + 1} / ${state.rowEditor.rowIds.length}`;
+  elements.rowEditorPrevButton.disabled = currentIndex <= 0;
+  elements.rowEditorNextButton.disabled = currentIndex >= state.rowEditor.rowIds.length - 1;
+  elements.rowEditorForm.innerHTML = `${guideHtml}${advancedHtml}`;
+  elements.rowEditorOverlay.hidden = false;
+  document.body.classList.add('is-modal-open');
+  window.requestAnimationFrame(() => {
+    elements.rowEditorOverlay?.classList.add('is-active');
+    focusRowEditorInput();
+  });
+  return true;
+}
+
 function renderRowEditor() {
+  if (renderRowEditorQuestionnaire()) {
+    return;
+  }
+
   if (!elements.rowEditorOverlay || !elements.rowEditorForm || !elements.rowEditorTitle || !elements.rowEditorMeta) {
     return;
   }
@@ -1575,6 +2112,7 @@ async function handlePdfImport(file) {
   document.body.classList.add('is-importing-pdf');
   elements.pickPdfButton?.setAttribute('disabled', 'disabled');
   try {
+    const { extractHandaiDataFromPdf } = await loadGeminiModule();
     const extracted = await extractHandaiDataFromPdf(file);
 
     const bundle = extracted.project.c2
@@ -1850,6 +2388,7 @@ function clearProjectState() {
   resetDrawingState();
   resetAssignmentState();
   resetReportState();
+  resetRowEditorState();
   syncSavedSignature();
   renderAll();
 }
@@ -2282,9 +2821,7 @@ function deleteSelectedRows() {
     state.rows = [createUiRow()];
   }
   if (state.rowEditor.open && !state.rows.some((row) => row.uiId === state.rowEditor.rowId)) {
-    state.rowEditor.open = false;
-    state.rowEditor.rowId = '';
-    state.rowEditor.rowIds = [];
+    resetRowEditorState();
   }
   state.selectedRowIds = new Set();
   renderRows();
@@ -2727,10 +3264,64 @@ function bindEvents() {
     scheduleAutoSave();
   });
 
+  elements.rowEditorForm?.addEventListener('change', (event) => {
+    const choice = event.target.closest('[data-row-editor-guide-choice]');
+    if (!choice) {
+      return;
+    }
+    const row = getRowEditorRow();
+    if (!row) {
+      return;
+    }
+    syncRowEditorGuideChoice(row, choice.dataset.rowEditorGuideChoice || '', choice.value);
+  });
+
   elements.rowEditorForm?.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       moveRowEditor(event.shiftKey ? -1 : 1);
+      return;
+    }
+
+    const guideInput = event.target.closest('[data-row-editor-guide-input="true"]');
+    if (!guideInput || event.key !== 'Enter' || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const row = getRowEditorRow();
+    if (!row) {
+      return;
+    }
+    const guideState = getRowEditorGuideState(row);
+    const stepKey = guideInput.dataset.rowEditorGuideStep || '';
+    const step = getRowEditorGuideSteps(row, guideState).find((item) => item.key === stepKey);
+    if (!step) {
+      return;
+    }
+    if (!isRowEditorGuideStepComplete(step, row, guideState)) {
+      showToast('入力してください。', 'error');
+      return;
+    }
+    guideState.activeKey = '';
+    renderRows();
+  });
+
+  elements.rowEditorForm?.addEventListener('click', (event) => {
+    const editButton = event.target.closest('[data-row-editor-guide-edit]');
+    if (editButton) {
+      const row = getRowEditorRow();
+      if (!row) {
+        return;
+      }
+      syncRowEditorGuideSelection(row, editButton.dataset.rowEditorGuideEdit || '');
+      return;
+    }
+
+    const toggleDetailsButton = event.target.closest('[data-row-editor-toggle-details]');
+    if (toggleDetailsButton) {
+      state.rowEditor.detailsOpen = !state.rowEditor.detailsOpen;
+      renderRows();
     }
   });
 
@@ -2860,8 +3451,12 @@ async function bootstrap() {
   bindEvents();
   setActiveMode(state.activeMode);
   setStatus('Firestore 版を初期化しました。');
-  await refreshProjects();
   markAppReady();
+  void refreshProjects();
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  console.error(error);
+  setStatus(`初期化に失敗しました: ${error.message}`);
+  markAppReady();
+});
