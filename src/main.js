@@ -395,12 +395,6 @@ function getRowEditorGuideSteps(row, guideState) {
           }
         ]
       : []),
-    {
-      key: 'draftAssignee',
-      fieldKey: 'draftAssignee',
-      prompt: 'バラ図担当は？',
-      type: 'text'
-    },
     ...(scope !== '扉'
       ? ROW_EDITOR_FRAME_DATE_KEYS.map((fieldKey) => ({
           key: fieldKey,
@@ -541,7 +535,7 @@ function buildRowEditorGuideHtml(row, guideState) {
       <div class="row-editor-guide-list">
         ${steps.map((step, index) => buildRowEditorGuideCard(step, row, guideState, activeIndex, index)).join('')}
       </div>
-      <p class="row-editor-guide-note subtle">Enter で次の質問へ進めます。変更したい項目は各カードの「変更」から戻れます。</p>
+      <p class="row-editor-guide-note subtle">Enter で次の質問へ進めます。バラ図担当はステップ1の担当を自動で使います。変更したい項目は各カードの「変更」から戻れます。</p>
     </section>
   `;
 }
@@ -656,11 +650,34 @@ function syncRowEditorGuideSelection(row, stepKey) {
   renderRows();
 }
 
+function getRowEditorDefaultAssignee() {
+  return String(state.project.contact || '').trim();
+}
+
+function syncRowEditorAssigneeDefaults(rows = []) {
+  const defaultAssignee = getRowEditorDefaultAssignee();
+  if (!defaultAssignee) {
+    return false;
+  }
+
+  let changed = false;
+  rows.forEach((row) => {
+    if (!row || String(row.draftAssignee || '').trim()) {
+      return;
+    }
+    row.draftAssignee = defaultAssignee;
+    changed = true;
+  });
+  return changed;
+}
+
 function createUiRow(overrides = {}) {
+  const defaultDraftAssignee = String(overrides.draftAssignee || '').trim() || getRowEditorDefaultAssignee();
   return {
     ...ROW_TEMPLATE,
     uiId: crypto.randomUUID(),
-    ...overrides
+    ...overrides,
+    draftAssignee: defaultDraftAssignee
   };
 }
 
@@ -1677,6 +1694,12 @@ function openRowEditor(rowId = '') {
   state.rowEditor.rowIds = rowIds;
   state.rowEditor.rowId = rowId && rowIds.includes(rowId) ? rowId : rowIds[0];
   state.rowEditor.detailsOpen = false;
+  const editedRows = state.rowEditor.rowIds
+    .map((itemId) => state.rows.find((item) => item.uiId === itemId))
+    .filter(Boolean);
+  if (syncRowEditorAssigneeDefaults(editedRows)) {
+    scheduleAutoSave();
+  }
   const currentRow = getRowEditorRow();
   if (currentRow) {
     getRowEditorGuideState(currentRow);
