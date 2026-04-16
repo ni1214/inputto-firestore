@@ -95,8 +95,8 @@
     <link
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
       rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-Da5WsKX7.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BVcaaHuJ.css">
+    <script type="module" crossorigin src="./assets/index-A5fERPAY.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BHdvcSu9.css">
   </head>
   <body>
     <div class="app-shell" id="appShell">
@@ -592,6 +592,10 @@
                       <span>絞込</span>
                       <input id="filterInput" type="text" placeholder="符号 / 品名 / フロア">
                     </label>
+                    <button id="openRowEditorButton" type="button" class="tonal-button">
+                      <span class="material-symbols-outlined">edit_note</span>
+                      <span>入力モーダル</span>
+                    </button>
                     <button id="addRowButton" type="button" class="ghost-button">
                       <span class="material-symbols-outlined">add_row_below</span>
                       <span>行追加</span>
@@ -688,6 +692,44 @@
             </div>
           </section>
         </section>
+      </div>
+    </div>
+
+    <div class="row-editor-overlay" id="rowEditorOverlay" hidden aria-hidden="true">
+      <div class="row-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="rowEditorTitle">
+        <div class="row-editor-header">
+          <div class="stack-tight">
+            <strong id="rowEditorTitle">符号を入力</strong>
+            <span class="subtle" id="rowEditorMeta">1 / 1</span>
+          </div>
+          <div class="cluster">
+            <button id="rowEditorPrevButton" type="button" class="ghost-button compact-button">
+              <span class="material-symbols-outlined">arrow_back</span>
+              <span>前</span>
+            </button>
+            <button id="rowEditorNextButton" type="button" class="ghost-button compact-button">
+              <span>次</span>
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </button>
+            <button type="button" class="ghost-button compact-button" data-row-editor-close>
+              <span class="material-symbols-outlined">close</span>
+              <span>閉じる</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="row-editor-body">
+          <div class="row-editor-hint subtle">選択した行を順番に入力できます。未選択のときは表示中の行を順に開きます。</div>
+          <form id="rowEditorForm" class="row-editor-form"></form>
+        </div>
+
+        <div class="row-editor-footer">
+          <span class="subtle">Ctrl + Enter で次の行、Ctrl + Shift + Enter で前の行へ移動できます。</span>
+          <button type="button" class="primary-button" data-row-editor-close>
+            <span class="material-symbols-outlined">done</span>
+            <span>入力を終える</span>
+          </button>
+        </div>
       </div>
     </div>
 

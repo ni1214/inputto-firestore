@@ -14,6 +14,32 @@ const ASSIGNMENT_STEPS = ['project', 'load', 'boxes', 'symbols', 'confirm'];
 const REPORT_STEPS = ['project', 'drawing', 'symbols', 'inspection', 'labels'];
 const FIRESTORE_LOAD_TIMEOUT_MS = 15000;
 const PDF_RELOAD_WARNING_MS = 120000;
+const ROW_EDITOR_GROUPS = [
+  {
+    title: '基本',
+    keys: ['symbol', 'name', 'floor', 'insideOutside', 'bakeColor', 'draftAssignee']
+  },
+  {
+    title: '数量',
+    keys: ['left', 'right', 'doubleLeft', 'doubleRight', 'noHand', 'floorQuantity']
+  },
+  {
+    title: 'ラベル',
+    keys: ['labelCount', 'labelRightCount', 'labelDoubleCount', 'labelNoHandCount']
+  },
+  {
+    title: '寸法',
+    keys: ['width', 'height', 'frameDepth', 'dwLeft', 'dwRight', 'dh']
+  },
+  {
+    title: '断熱材',
+    keys: ['gwDensity', 'gwThickness', 'rwDensity', 'rwThickness']
+  },
+  {
+    title: '日程',
+    keys: ['draftFrameAt', 'draftDoorAt', 'assemblyFrameCompletedAt', 'assemblyDoorCompletedAt', 'frameShipDate', 'doorShipDate']
+  }
+];
 
 const state = {
   env: 'production',
@@ -31,6 +57,11 @@ const state = {
   rows: [],
   selectedRowIds: new Set(),
   filterText: '',
+  rowEditor: {
+    open: false,
+    rowId: '',
+    rowIds: []
+  },
   assignment: {
     rows: [],
     selectedDocIds: new Set(),
@@ -108,11 +139,19 @@ const elements = {
   appDropOverlay: document.getElementById('appDropOverlay'),
   pdfBusyOverlay: document.getElementById('pdfBusyOverlay'),
   filterInput: document.getElementById('filterInput'),
+  openRowEditorButton: document.getElementById('openRowEditorButton'),
   addRowButton: document.getElementById('addRowButton'),
   duplicateRowButton: document.getElementById('duplicateRowButton'),
   deleteRowsButton: document.getElementById('deleteRowsButton'),
   tableHead: document.getElementById('tableHead'),
   tableBody: document.getElementById('tableBody'),
+  rowEditorOverlay: document.getElementById('rowEditorOverlay'),
+  rowEditorTitle: document.getElementById('rowEditorTitle'),
+  rowEditorMeta: document.getElementById('rowEditorMeta'),
+  rowEditorForm: document.getElementById('rowEditorForm'),
+  rowEditorPrevButton: document.getElementById('rowEditorPrevButton'),
+  rowEditorNextButton: document.getElementById('rowEditorNextButton'),
+  rowEditorCloseButtons: Array.from(document.querySelectorAll('[data-row-editor-close]')),
   searchProjectSelect: document.getElementById('searchProjectSelect'),
   searchKeywordInput: document.getElementById('searchKeywordInput'),
   searchFloorInput: document.getElementById('searchFloorInput'),
@@ -138,6 +177,7 @@ const elements = {
 let autoSaveTimerId = null;
 let lastSavedSignature = '';
 let appDragDepth = 0;
+const FIELD_DEF_MAP = new Map(FIELD_DEFS.map((field) => [field.key, field]));
 
 function createUiRow(overrides = {}) {
   return {
@@ -1065,6 +1105,174 @@ function renderTableHead() {
   elements.tableHead.innerHTML = `<tr>${headCells}</tr>`;
 }
 
+function getVisibleRows() {
+  return state.rows.filter(matchesFilter);
+}
+
+function getRowEditorRow() {
+  return state.rows.find((row) => row.uiId === state.rowEditor.rowId) || null;
+}
+
+function getRowEditorRows(rowId = '') {
+  const visibleRows = getVisibleRows();
+  const selectedRows = visibleRows.filter((row) => state.selectedRowIds.has(row.uiId));
+  const baseRows = selectedRows.length ? selectedRows : visibleRows;
+  if (!baseRows.length) {
+    return [];
+  }
+  if (!rowId) {
+    return baseRows;
+  }
+  if (baseRows.some((row) => row.uiId === rowId)) {
+    return baseRows;
+  }
+  const targetRow = state.rows.find((row) => row.uiId === rowId);
+  return targetRow ? [targetRow, ...baseRows.filter((row) => row.uiId !== rowId)] : baseRows;
+}
+
+function syncInlineRowInput(rowId, fieldKey, value) {
+  const inlineInput = elements.tableBody.querySelector(`[data-row-id="${CSS.escape(rowId)}"][data-field-key="${CSS.escape(fieldKey)}"]`);
+  if (inlineInput && inlineInput.value !== value) {
+    inlineInput.value = value;
+  }
+}
+
+function updateRowEditorLauncher() {
+  if (!elements.openRowEditorButton) {
+    return;
+  }
+  const visibleCount = getVisibleRows().length;
+  const selectedCount = getVisibleRows().filter((row) => state.selectedRowIds.has(row.uiId)).length;
+  const targetCount = selectedCount || visibleCount;
+  elements.openRowEditorButton.disabled = targetCount === 0;
+  const label = selectedCount
+    ? `選択 ${selectedCount}件を入力`
+    : visibleCount
+      ? `表示中 ${visibleCount}件を入力`
+      : '入力モーダル';
+  const labelElement = elements.openRowEditorButton.querySelector('span:last-child');
+  if (labelElement) {
+    labelElement.textContent = label;
+  }
+}
+
+function focusRowEditorInput() {
+  const modalInputs = Array.from(elements.rowEditorForm?.querySelectorAll('[data-row-editor-field]') || []);
+  const target = modalInputs.find((input) => !String(input.value || '').trim()) || modalInputs[0];
+  target?.focus();
+  target?.select?.();
+}
+
+function closeRowEditor({ restoreFocus = false } = {}) {
+  state.rowEditor.open = false;
+  state.rowEditor.rowId = '';
+  state.rowEditor.rowIds = [];
+  document.body.classList.remove('is-modal-open');
+  if (elements.rowEditorOverlay) {
+    elements.rowEditorOverlay.classList.remove('is-active');
+    elements.rowEditorOverlay.hidden = true;
+  }
+  renderRows();
+  if (restoreFocus) {
+    elements.openRowEditorButton?.focus();
+  }
+}
+
+function openRowEditor(rowId = '') {
+  const rowIds = getRowEditorRows(rowId).map((row) => row.uiId);
+  if (!rowIds.length) {
+    showToast('入力する行がありません。', 'error');
+    return;
+  }
+  state.rowEditor.open = true;
+  state.rowEditor.rowIds = rowIds;
+  state.rowEditor.rowId = rowId && rowIds.includes(rowId) ? rowId : rowIds[0];
+  renderRowEditor();
+}
+
+function moveRowEditor(offset) {
+  if (!state.rowEditor.open || !state.rowEditor.rowIds.length) {
+    return;
+  }
+  const index = state.rowEditor.rowIds.indexOf(state.rowEditor.rowId);
+  if (index < 0) {
+    return;
+  }
+  const nextIndex = index + offset;
+  if (nextIndex < 0 || nextIndex >= state.rowEditor.rowIds.length) {
+    return;
+  }
+  state.rowEditor.rowId = state.rowEditor.rowIds[nextIndex];
+  renderRows();
+}
+
+function renderRowEditor() {
+  if (!elements.rowEditorOverlay || !elements.rowEditorForm || !elements.rowEditorTitle || !elements.rowEditorMeta) {
+    return;
+  }
+
+  updateRowEditorLauncher();
+
+  if (!state.rowEditor.open) {
+    elements.rowEditorOverlay.classList.remove('is-active');
+    elements.rowEditorOverlay.hidden = true;
+    return;
+  }
+
+  state.rowEditor.rowIds = state.rowEditor.rowIds.filter((rowId) => state.rows.some((row) => row.uiId === rowId));
+  const row = getRowEditorRow();
+  if (!row || !state.rowEditor.rowIds.length) {
+    closeRowEditor();
+    return;
+  }
+
+  const currentIndex = Math.max(0, state.rowEditor.rowIds.indexOf(row.uiId));
+  const groupsHtml = ROW_EDITOR_GROUPS
+    .map((group) => {
+      const fields = group.keys
+        .map((key) => FIELD_DEF_MAP.get(key))
+        .filter(Boolean)
+        .map((field) => {
+          const inputType = field.type || 'text';
+          const step = inputType === 'number' ? ' step="1"' : '';
+          return `
+            <label class="field row-editor-field">
+              <span>${escapeHtml(field.label)}</span>
+              <input
+                data-row-editor-field="${escapeHtml(field.key)}"
+                type="${escapeHtml(inputType)}"
+                value="${escapeHtml(row[field.key] || '')}"${step}>
+            </label>
+          `;
+        })
+        .join('');
+
+      return `
+        <section class="row-editor-section">
+          <div class="section-head">
+            <h4>${escapeHtml(group.title)}</h4>
+          </div>
+          <div class="row-editor-fields">
+            ${fields}
+          </div>
+        </section>
+      `;
+    })
+    .join('');
+
+  elements.rowEditorTitle.textContent = row.symbol ? `${row.symbol} を入力` : `符号 ${currentIndex + 1} を入力`;
+  elements.rowEditorMeta.textContent = `${currentIndex + 1} / ${state.rowEditor.rowIds.length}`;
+  elements.rowEditorPrevButton.disabled = currentIndex <= 0;
+  elements.rowEditorNextButton.disabled = currentIndex >= state.rowEditor.rowIds.length - 1;
+  elements.rowEditorForm.innerHTML = groupsHtml;
+  elements.rowEditorOverlay.hidden = false;
+  document.body.classList.add('is-modal-open');
+  window.requestAnimationFrame(() => {
+    elements.rowEditorOverlay?.classList.add('is-active');
+    focusRowEditorInput();
+  });
+}
+
 function matchesFilter(row) {
   const term = state.filterText.trim().toLowerCase();
   if (!term) {
@@ -1511,6 +1719,10 @@ function renderRows() {
   if (!visibleRows.length) {
     elements.tableBody.innerHTML = '<tr><td colspan="34" class="empty-text">表示できる符号がありません。</td></tr>';
     renderReport();
+    updateRowEditorLauncher();
+    if (state.rowEditor.open) {
+      renderRowEditor();
+    }
     return;
   }
 
@@ -1536,11 +1748,15 @@ function renderRows() {
           </td>
         `;
       }).join('');
-      return `<tr>${checkbox}${cells}</tr>`;
+      return `<tr data-row-editor-row="${escapeHtml(row.uiId)}">${checkbox}${cells}</tr>`;
     })
     .join('');
 
   renderReport();
+  updateRowEditorLauncher();
+  if (state.rowEditor.open) {
+    renderRowEditor();
+  }
 }
 
 function renderSearchResults() {
@@ -2001,8 +2217,10 @@ async function saveCurrent(options = {}) {
 }
 
 function addRow() {
-  state.rows.push(createUiRow());
+  const newRow = createUiRow();
+  state.rows.push(newRow);
   renderRows();
+  openRowEditor(newRow.uiId);
   scheduleAutoSave();
 }
 
@@ -2062,6 +2280,11 @@ function deleteSelectedRows() {
   state.rows = state.rows.filter((row) => !state.selectedRowIds.has(row.uiId));
   if (!state.rows.length) {
     state.rows = [createUiRow()];
+  }
+  if (state.rowEditor.open && !state.rows.some((row) => row.uiId === state.rowEditor.rowId)) {
+    state.rowEditor.open = false;
+    state.rowEditor.rowId = '';
+    state.rowEditor.rowIds = [];
   }
   state.selectedRowIds = new Set();
   renderRows();
@@ -2369,6 +2592,9 @@ function bindEvents() {
   elements.addRowButton.addEventListener('click', addRow);
   elements.duplicateRowButton.addEventListener('click', duplicateSelectedRows);
   elements.deleteRowsButton.addEventListener('click', deleteSelectedRows);
+  elements.openRowEditorButton?.addEventListener('click', () => {
+    openRowEditor();
+  });
   elements.filterInput.addEventListener('input', () => {
     state.filterText = elements.filterInput.value;
     renderRows();
@@ -2448,6 +2674,18 @@ function bindEvents() {
     } else {
       state.selectedRowIds.delete(rowId);
     }
+    updateRowEditorLauncher();
+  });
+
+  elements.tableBody.addEventListener('dblclick', (event) => {
+    if (event.target.closest('[data-row-select]')) {
+      return;
+    }
+    const rowElement = event.target.closest('[data-row-editor-row]');
+    if (!rowElement) {
+      return;
+    }
+    openRowEditor(rowElement.dataset.rowEditorRow);
   });
 
   elements.tableHead.addEventListener('change', (event) => {
@@ -2468,8 +2706,62 @@ function bindEvents() {
     await openSearchResult(button.dataset.openSearchResult);
   });
 
+  elements.rowEditorForm?.addEventListener('input', (event) => {
+    const input = event.target.closest('[data-row-editor-field]');
+    if (!input) {
+      return;
+    }
+    const row = getRowEditorRow();
+    if (!row) {
+      return;
+    }
+    row[input.dataset.rowEditorField] = input.value;
+    syncInlineRowInput(row.uiId, input.dataset.rowEditorField, input.value);
+    if (input.dataset.rowEditorField === 'symbol' && elements.rowEditorTitle) {
+      const currentIndex = Math.max(0, state.rowEditor.rowIds.indexOf(row.uiId));
+      elements.rowEditorTitle.textContent = input.value
+        ? `${input.value} を入力`
+        : `符号 ${currentIndex + 1} を入力`;
+    }
+    renderReport();
+    scheduleAutoSave();
+  });
+
+  elements.rowEditorForm?.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      moveRowEditor(event.shiftKey ? -1 : 1);
+    }
+  });
+
+  elements.rowEditorPrevButton?.addEventListener('click', () => {
+    moveRowEditor(-1);
+  });
+
+  elements.rowEditorNextButton?.addEventListener('click', () => {
+    moveRowEditor(1);
+  });
+
+  elements.rowEditorCloseButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      closeRowEditor({ restoreFocus: true });
+    });
+  });
+
+  elements.rowEditorOverlay?.addEventListener('click', (event) => {
+    if (event.target === elements.rowEditorOverlay) {
+      closeRowEditor({ restoreFocus: true });
+    }
+  });
+
   elements.pickPdfButton.addEventListener('click', () => {
     elements.pdfFileInput.click();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.rowEditor.open) {
+      closeRowEditor({ restoreFocus: true });
+    }
   });
 
   document.addEventListener('dragenter', (event) => {
