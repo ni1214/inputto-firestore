@@ -1074,6 +1074,103 @@ h4 {
   min-height: 50px;
 }
 
+.panel-soft {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ffffff, #f4f7ff);
+}
+
+.row-editor-guide {
+  display: grid;
+  gap: 14px;
+}
+
+.row-editor-guide-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.row-editor-guide-list {
+  display: grid;
+  gap: 12px;
+}
+
+.row-editor-guide-step {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.row-editor-guide-step.is-active {
+  border-color: var(--primary);
+  box-shadow: 0 16px 30px rgba(51, 94, 234, 0.12);
+}
+
+.row-editor-guide-step.is-complete {
+  background: #f8fbff;
+}
+
+.row-editor-guide-step-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.row-editor-guide-step-eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.row-editor-guide-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.row-editor-guide-step-body {
+  display: grid;
+  gap: 10px;
+}
+
+.row-editor-guide-field span {
+  font-size: 0.94rem;
+}
+
+.row-editor-guide-input {
+  min-height: 52px;
+  width: 100%;
+}
+
+.row-editor-guide-help,
+.row-editor-guide-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.row-editor-details {
+  display: grid;
+  gap: 14px;
+}
+
 .search-table {
   min-width: 100%;
 }
@@ -1289,6 +1386,15 @@ h4 {
   .assignment-stepper {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .row-editor-guide-header,
+  .row-editor-guide-step-head {
+    align-items: stretch;
+  }
+
+  .row-editor-guide-step-meta {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1311,6 +1417,15 @@ h4 {
 
   .row-editor-fields {
     grid-template-columns: 1fr;
+  }
+
+  .row-editor-guide {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .row-editor-guide-step {
+    padding: 14px;
   }
 
   .report-settings {
