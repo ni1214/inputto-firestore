@@ -30,22 +30,8 @@ export const ROW_TEMPLATE = {
   dh: '',
   insideOutside: '',
   labelCount: '',
-  labelRightCount: '',
-  labelDoubleCount: '',
-  labelNoHandCount: '',
   bakeColor: '',
-  floorQuantity: '',
-  gwDensity: '',
-  gwThickness: '',
-  rwDensity: '',
-  rwThickness: '',
-  draftAssignee: '',
-  draftFrameAt: '',
-  draftDoorAt: '',
-  assemblyFrameCompletedAt: '',
-  assemblyDoorCompletedAt: '',
-  frameShipDate: '',
-  doorShipDate: ''
+  floorQuantity: ''
 };
 
 export const FIELD_DEFS = [
@@ -66,20 +52,6 @@ export const FIELD_DEFS = [
   { key: 'dh', label: 'DH', type: 'number', width: '6rem' },
   { key: 'insideOutside', label: '内外', width: '7rem' },
   { key: 'labelCount', label: 'ラベル枚数', type: 'number', width: '7rem' },
-  { key: 'labelRightCount', label: 'R', type: 'number', width: '5rem' },
-  { key: 'labelDoubleCount', label: '両', type: 'number', width: '5rem' },
-  { key: 'labelNoHandCount', label: '勝手なし', type: 'number', width: '7rem' },
   { key: 'bakeColor', label: '焼付色', width: '8rem' },
-  { key: 'floorQuantity', label: 'フロアごとの数量', type: 'number', width: '8rem' },
-  { key: 'gwDensity', label: 'GW密度', type: 'number', width: '7rem' },
-  { key: 'gwThickness', label: 'GW厚み', type: 'number', width: '7rem' },
-  { key: 'rwDensity', label: 'RW密度', type: 'number', width: '7rem' },
-  { key: 'rwThickness', label: 'RW厚み', type: 'number', width: '7rem' },
-  { key: 'draftAssignee', label: 'バラ図担当', width: '8rem' },
-  { key: 'draftFrameAt', label: 'バラ図_枠', type: 'date', width: '9rem' },
-  { key: 'draftDoorAt', label: 'バラ図_扉', type: 'date', width: '9rem' },
-  { key: 'assemblyFrameCompletedAt', label: '組立完了日_枠', type: 'date', width: '10rem' },
-  { key: 'assemblyDoorCompletedAt', label: '組立完了日_扉', type: 'date', width: '10rem' },
-  { key: 'frameShipDate', label: '枠出荷日', type: 'date', width: '9rem' },
-  { key: 'doorShipDate', label: '扉出荷日', type: 'date', width: '9rem' }
+  { key: 'floorQuantity', label: 'フロアごとの数量', type: 'number', width: '8rem' }
 ];
