@@ -109,6 +109,7 @@ function sanitizeRow(row) {
     docId: sanitizeText(row.docId),
     symbol: sanitizeText(row.symbol),
     name: sanitizeText(row.name),
+    frameDoorKind: sanitizeText(row.frameDoorKind),
     floor: sanitizeText(row.floor),
     left: sanitizeNumberText(row.left),
     right: sanitizeNumberText(row.right),

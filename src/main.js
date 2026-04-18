@@ -1,6 +1,7 @@
 import './style.css';
 import { FIELD_DEFS, PROJECT_TEMPLATE, DRAWING_TEMPLATE, ROW_TEMPLATE } from './schema.js';
 import { assignSymbolsToDrawing, listProjects, loadAssignmentHistory, loadProjectBundle, loadDrawingRows, loadProjectSymbols, saveDrawingBundle } from './store.js';
+import { extractHandaiDataFromPdf } from './gemini.js';
 
 const SAVE_ACTOR = 'system';
 const SIDEBAR_STORAGE_KEY = 'inputto_sidebar_collapsed';
@@ -13,49 +14,6 @@ const ASSIGNMENT_STEPS = ['project', 'load', 'boxes', 'symbols', 'confirm'];
 const REPORT_STEPS = ['project', 'drawing', 'symbols', 'inspection', 'labels'];
 const FIRESTORE_LOAD_TIMEOUT_MS = 15000;
 const PDF_RELOAD_WARNING_MS = 120000;
-const ROW_EDITOR_GROUPS = [
-  {
-    title: '基本',
-    keys: ['symbol', 'name', 'floor', 'insideOutside', 'bakeColor', 'draftAssignee']
-  },
-  {
-    title: '数量',
-    keys: ['left', 'right', 'doubleLeft', 'doubleRight', 'noHand', 'floorQuantity']
-  },
-  {
-    title: 'ラベル',
-    keys: ['labelCount', 'labelRightCount', 'labelDoubleCount', 'labelNoHandCount']
-  },
-  {
-    title: '寸法',
-    keys: ['width', 'height', 'frameDepth', 'dwLeft', 'dwRight', 'dh']
-  },
-  {
-    title: '断熱材',
-    keys: ['gwDensity', 'gwThickness', 'rwDensity', 'rwThickness']
-  },
-  {
-    title: '日程',
-    keys: ['draftFrameAt', 'draftDoorAt', 'assemblyFrameCompletedAt', 'assemblyDoorCompletedAt', 'frameShipDate', 'doorShipDate']
-  }
-];
-
-const ROW_EDITOR_SCOPE_OPTIONS = ['枠', '扉', '枠扉'];
-const ROW_EDITOR_FINISH_OPTIONS = ['錆止め', '焼付'];
-const ROW_EDITOR_FRAME_DATE_KEYS = ['draftFrameAt', 'assemblyFrameCompletedAt', 'frameShipDate'];
-const ROW_EDITOR_DOOR_DATE_KEYS = ['draftDoorAt', 'assemblyDoorCompletedAt', 'doorShipDate'];
-const ROW_EDITOR_GUIDED_FIELD_KEYS = new Set([
-  'symbol',
-  'name',
-  'floor',
-  'insideOutside',
-  'labelCount',
-  'bakeColor',
-  'draftAssignee',
-  ...ROW_EDITOR_FRAME_DATE_KEYS,
-  ...ROW_EDITOR_DOOR_DATE_KEYS
-]);
-
 const state = {
   env: 'production',
   activeMode: normalizeMode(localStorage.getItem(MODE_STORAGE_KEY)),
@@ -76,8 +34,7 @@ const state = {
     open: false,
     rowId: '',
     rowIds: [],
-    guideByRowId: Object.create(null),
-    detailsOpen: false
+    pageIndex: 0
   },
   assignment: {
     rows: [],
@@ -195,489 +152,190 @@ let autoSaveTimerId = null;
 let lastSavedSignature = '';
 let appDragDepth = 0;
 const FIELD_DEF_MAP = new Map(FIELD_DEFS.map((field) => [field.key, field]));
-let geminiModulePromise = null;
+const HIDDEN_FIELD_KEYS = new Set([
+  'labelRightCount',
+  'labelDoubleCount',
+  'labelNoHandCount',
+  'frameDoorKind',
+  'draftAssignee',
+  'draftFrameAt',
+  'draftDoorAt',
+  'assemblyFrameCompletedAt',
+  'assemblyDoorCompletedAt',
+  'frameShipDate',
+  'doorShipDate'
+]);
+const VISIBLE_FIELD_DEFS = FIELD_DEFS.filter((field) => !HIDDEN_FIELD_KEYS.has(field.key));
+const VISIBLE_FIELD_DEF_MAP = new Map(VISIBLE_FIELD_DEFS.map((field) => [field.key, field]));
 
-function loadGeminiModule() {
-  if (!geminiModulePromise) {
-    geminiModulePromise = import('./gemini.js');
+const ROW_EDITOR_QUESTION_TEXTS = {
+  symbol: '符号は？',
+  name: '品名は？',
+  frameDoorKind: '枠ですか？扉ですか？枠扉ですか？',
+  floor: 'フロアは？',
+  insideOutside: '内外は？',
+  left: 'Lは？',
+  right: 'Rは？',
+  doubleLeft: '両開き_L親は？',
+  doubleRight: '両開き_R親は？',
+  noHand: '勝手なしは？',
+  floorQuantity: 'フロアごとの数量は？',
+  width: 'Wは？',
+  height: 'Hは？',
+  frameDepth: '枠見込は？',
+  dwLeft: 'DW(L)は？',
+  dwRight: 'DW(R)は？',
+  dh: 'DHは？',
+  labelCount: 'ラベル枚数は？',
+  labelRightCount: 'Rは？',
+  labelDoubleCount: '両は？',
+  labelNoHandCount: '勝手なしは？',
+  bakeColor: '焼付色は？',
+  gwDensity: 'GW密度は？',
+  gwThickness: 'GW厚みは？',
+  rwDensity: 'RW密度は？',
+  rwThickness: 'RW厚みは？',
+  draftAssignee: 'バラ図担当は？',
+  draftFrameAt: 'バラ図_枠は？',
+  draftDoorAt: 'バラ図_扉は？',
+  assemblyFrameCompletedAt: '組立完了日_枠は？',
+  assemblyDoorCompletedAt: '組立完了日_扉は？',
+  frameShipDate: '枠出荷日は？',
+  doorShipDate: '扉出荷日は？'
+};
+
+const ROW_EDITOR_PAGE_DEFS = [
+  {
+    key: 'basic',
+    title: '基本',
+    description: '符号と品名を入れます。',
+    fieldKeys: ['symbol', 'name']
+  },
+  {
+    key: 'location',
+    title: '種別・場所',
+    description: '枠/扉の種別とフロア、内外を確認します。',
+    fieldKeys: ['frameDoorKind', 'floor', 'insideOutside']
+  },
+  {
+    key: 'quantity',
+    title: '数量',
+    description: '開き方の数量をまとめて入れます。',
+    fieldKeys: ['left', 'right', 'doubleLeft', 'doubleRight', 'noHand']
+  },
+  {
+    key: 'finish',
+    title: 'フロア・仕上げ',
+    description: 'フロアごとの数量と焼付色を入れます。',
+    fieldKeys: ['floorQuantity', 'bakeColor']
+  },
+  {
+    key: 'frame',
+    title: '枠寸法',
+    description: '枠を選んだときに表示します。',
+    fieldKeys: ['width', 'height', 'frameDepth'],
+    showWhen: (row) => isFrameKindSelected(row.frameDoorKind)
+  },
+  {
+    key: 'door',
+    title: '扉寸法',
+    description: '扉を選んだときに表示します。',
+    fieldKeys: ['dwLeft', 'dwRight', 'dh'],
+    showWhen: (row) => isDoorKindSelected(row.frameDoorKind)
+  },
+  {
+    key: 'label',
+    title: 'ラベル',
+    description: 'ラベル枚数の内訳を入れます。',
+    fieldKeys: ['labelCount', 'labelRightCount', 'labelDoubleCount', 'labelNoHandCount']
+  },
+  {
+    key: 'insulation',
+    title: '断熱材',
+    description: 'GW / RW の密度と厚みを入れます。',
+    fieldKeys: ['gwDensity', 'gwThickness', 'rwDensity', 'rwThickness']
+  },
+  {
+    key: 'draft',
+    title: 'バラ図',
+    description: 'バラ図担当と日付を入れます。',
+    fieldKeys: ['draftAssignee', 'draftFrameAt', 'draftDoorAt']
+  },
+  {
+    key: 'schedule',
+    title: '組立・出荷',
+    description: '組立完了と出荷日を入れます。',
+    fieldKeys: ['assemblyFrameCompletedAt', 'assemblyDoorCompletedAt', 'frameShipDate', 'doorShipDate']
   }
-  return geminiModulePromise;
+];
+
+function isFrameKindSelected(value) {
+  return ['枠', '枠扉'].includes(String(value || '').trim());
 }
 
-function normalizeRowEditorScope(value) {
-  const text = String(value || '')
-    .normalize('NFKC')
-    .trim();
-  if (!text) {
-    return '';
-  }
-  if (text.includes('枠扉') || text.includes('両方')) {
-    return '枠扉';
-  }
-  if (text.includes('枠')) {
-    return '枠';
-  }
-  if (text.includes('扉')) {
-    return '扉';
-  }
-  return '';
+function isDoorKindSelected(value) {
+  return ['扉', '枠扉'].includes(String(value || '').trim());
 }
 
-function normalizeRowEditorFinishMode(value) {
-  const text = String(value || '')
-    .normalize('NFKC')
-    .trim();
-  if (!text) {
-    return '';
-  }
-  if (text.includes('焼')) {
-    return '焼付';
-  }
-  if (text.includes('錆')) {
-    return '錆止め';
-  }
-  return text;
+function getRowEditorQuestionText(field) {
+  return ROW_EDITOR_QUESTION_TEXTS[field.key] || `${field.label}は？`;
 }
 
-function deriveRowEditorScope(row) {
-  const hasFrameDates = ROW_EDITOR_FRAME_DATE_KEYS.some((key) => String(row[key] || '').trim());
-  const hasDoorDates = ROW_EDITOR_DOOR_DATE_KEYS.some((key) => String(row[key] || '').trim());
-  if (hasFrameDates && hasDoorDates) {
-    return '枠扉';
-  }
-  if (hasFrameDates) {
-    return '枠';
-  }
-  if (hasDoorDates) {
-    return '扉';
-  }
-  return '';
+function getRowEditorPages(row) {
+  return ROW_EDITOR_PAGE_DEFS
+    .filter((page) => !page.showWhen || page.showWhen(row))
+    .map((page) => ({
+      ...page,
+      fields: page.fieldKeys
+        .map((key) => FIELD_DEF_MAP.get(key))
+        .filter(Boolean)
+    }))
+    .filter((page) => page.fields.length > 0);
 }
 
-function deriveRowEditorFinishMode(row) {
-  return String(row.bakeColor || '').trim() ? '焼付' : '';
-}
+function renderRowEditorField(field, row, fieldIndex) {
+  const value = row[field.key] || '';
+  const questionText = getRowEditorQuestionText(field);
 
-function getRowEditorGuideState(row) {
-  const rowId = row?.uiId || '';
-  if (!rowId) {
-    return { scope: '', finishMode: '', activeKey: '' };
-  }
+  if (field.key === 'frameDoorKind') {
+    const options = Array.isArray(field.options) ? field.options : [];
+    const optionHtml = [''].concat(options).map((option) => {
+      const selected = String(value || '') === String(option || '');
+      const label = option ? escapeHtml(option) : '選択してください';
+      const optionValue = option ? escapeHtml(option) : '';
+      return `<option value="${optionValue}"${selected ? ' selected' : ''}>${label}</option>`;
+    }).join('');
 
-  if (!state.rowEditor.guideByRowId[rowId]) {
-    state.rowEditor.guideByRowId[rowId] = {
-      scope: deriveRowEditorScope(row),
-      finishMode: deriveRowEditorFinishMode(row),
-      activeKey: ''
-    };
-  } else {
-    const guideState = state.rowEditor.guideByRowId[rowId];
-    if (!guideState.scope) {
-      guideState.scope = deriveRowEditorScope(row);
-    }
-    if (!guideState.finishMode) {
-      guideState.finishMode = deriveRowEditorFinishMode(row);
-    }
-    if (typeof guideState.activeKey !== 'string') {
-      guideState.activeKey = '';
-    }
-  }
-
-  return state.rowEditor.guideByRowId[rowId];
-}
-
-function getRowEditorGuideStepValue(step, row, guideState) {
-  if (step.key === 'scope') {
-    return normalizeRowEditorScope(guideState.scope || deriveRowEditorScope(row));
-  }
-  if (step.key === 'finishMode') {
-    return normalizeRowEditorFinishMode(guideState.finishMode || deriveRowEditorFinishMode(row));
-  }
-  return String(row?.[step.fieldKey] || '').trim();
-}
-
-function getRowEditorGuideStepPrompt(step, guideState) {
-  if (step.key === 'draftFrameAt') {
-    return '枠のバラ図日は？';
-  }
-  if (step.key === 'draftDoorAt') {
-    return '扉のバラ図日は？';
-  }
-  if (step.key === 'assemblyFrameCompletedAt') {
-    return '枠の組立完了日は？';
-  }
-  if (step.key === 'assemblyDoorCompletedAt') {
-    return '扉の組立完了日は？';
-  }
-  if (step.key === 'frameShipDate') {
-    return '枠の出荷日は？';
-  }
-  if (step.key === 'doorShipDate') {
-    return '扉の出荷日は？';
-  }
-  if (step.key === 'bakeColor' && normalizeRowEditorFinishMode(guideState.finishMode) === '焼付') {
-    return '焼付色は？';
-  }
-  return step.prompt;
-}
-
-function isRowEditorGuideStepComplete(step, row, guideState) {
-  if (step.key === 'scope') {
-    return Boolean(getRowEditorGuideStepValue(step, row, guideState));
-  }
-  if (step.key === 'finishMode') {
-    return Boolean(getRowEditorGuideStepValue(step, row, guideState));
-  }
-  if (step.key === 'bakeColor') {
-    return normalizeRowEditorFinishMode(guideState.finishMode || deriveRowEditorFinishMode(row)) !== '焼付' || Boolean(getRowEditorGuideStepValue(step, row, guideState));
-  }
-  return Boolean(getRowEditorGuideStepValue(step, row, guideState));
-}
-
-function getRowEditorGuideSteps(row, guideState) {
-  const scope = normalizeRowEditorScope(guideState.scope || deriveRowEditorScope(row));
-  const finishMode = normalizeRowEditorFinishMode(guideState.finishMode || deriveRowEditorFinishMode(row));
-  const steps = [
-    {
-      key: 'symbol',
-      fieldKey: 'symbol',
-      prompt: '符号は？',
-      type: 'text',
-      required: true
-    },
-    {
-      key: 'name',
-      fieldKey: 'name',
-      prompt: '品名は？',
-      type: 'text'
-    },
-    {
-      key: 'scope',
-      prompt: '枠ですか？扉ですか？枠扉ですか？',
-      type: 'choice',
-      options: ROW_EDITOR_SCOPE_OPTIONS,
-      help: '枠を選ぶと扉の日程は省きます。'
-    },
-    {
-      key: 'floor',
-      fieldKey: 'floor',
-      prompt: 'フロアは？',
-      type: 'text'
-    },
-    {
-      key: 'insideOutside',
-      fieldKey: 'insideOutside',
-      prompt: '内外は？',
-      type: 'text'
-    },
-    {
-      key: 'labelCount',
-      fieldKey: 'labelCount',
-      prompt: 'ラベル何枚必要ですか？',
-      type: 'number',
-      required: true
-    },
-    {
-      key: 'finishMode',
-      prompt: '錆止めですか？焼付ですか？',
-      type: 'choice',
-      options: ROW_EDITOR_FINISH_OPTIONS,
-      help: '焼付なら色も続けて聞きます。'
-    },
-    ...(finishMode === '焼付'
-      ? [
-          {
-            key: 'bakeColor',
-            fieldKey: 'bakeColor',
-            prompt: '焼付色は？',
-            type: 'text',
-            required: true
-          }
-        ]
-      : []),
-    ...(scope !== '扉'
-      ? ROW_EDITOR_FRAME_DATE_KEYS.map((fieldKey) => ({
-          key: fieldKey,
-          fieldKey,
-          prompt: getRowEditorGuideStepPrompt({ key: fieldKey }, guideState),
-          type: 'date'
-        }))
-      : []),
-    ...(scope !== '枠'
-      ? ROW_EDITOR_DOOR_DATE_KEYS.map((fieldKey) => ({
-          key: fieldKey,
-          fieldKey,
-          prompt: getRowEditorGuideStepPrompt({ key: fieldKey }, guideState),
-          type: 'date'
-        }))
-      : [])
-  ];
-
-  return steps;
-}
-
-function getRowEditorGuideStepIndex(row, guideState, steps) {
-  if (guideState.activeKey) {
-    const activeIndex = steps.findIndex((step) => step.key === guideState.activeKey);
-    if (activeIndex >= 0) {
-      return activeIndex;
-    }
-    guideState.activeKey = '';
-  }
-
-  return steps.findIndex((step) => !isRowEditorGuideStepComplete(step, row, guideState));
-}
-
-function formatRowEditorGuideValue(step, row, guideState) {
-  const value = getRowEditorGuideStepValue(step, row, guideState);
-  if (step.key === 'scope' || step.key === 'finishMode') {
-    return value || '未選択';
-  }
-  return value || '未入力';
-}
-
-function buildRowEditorGuideInput(step, row, guideState, isActive) {
-  const value = getRowEditorGuideStepValue(step, row, guideState);
-  const activeAttr = isActive ? ' data-row-editor-guide-active="true"' : '';
-
-  if (step.key === 'scope' || step.key === 'finishMode') {
-    const options = step.key === 'scope' ? ROW_EDITOR_SCOPE_OPTIONS : ROW_EDITOR_FINISH_OPTIONS;
     return `
-      <select
-        class="row-editor-guide-input"
-        data-row-editor-guide-input="true"
-        data-row-editor-guide-choice="${escapeHtml(step.key)}"
-        data-row-editor-guide-step="${escapeHtml(step.key)}"${activeAttr}>
-        <option value="">選択してください</option>
-        ${options
-          .map((option) => `<option value="${escapeHtml(option)}"${option === value ? ' selected' : ''}>${escapeHtml(option)}</option>`)
-          .join('')}
-      </select>
+      <label class="field row-editor-field row-editor-question">
+        <span class="row-editor-question-index">質問 ${fieldIndex + 1}</span>
+        <strong class="row-editor-question-text">${escapeHtml(questionText)}</strong>
+        <select data-row-editor-field="${escapeHtml(field.key)}">
+          ${optionHtml}
+        </select>
+      </label>
     `;
   }
 
-  const inputType = step.type || 'text';
-  const extraAttrs = [];
-  if (inputType === 'number') {
-    extraAttrs.push('min="0"', 'step="1"');
-  }
-
-  return `
-    <input
-      class="row-editor-guide-input"
-      data-row-editor-guide-input="true"
-      data-row-editor-guide-step="${escapeHtml(step.key)}"
-      data-row-editor-field="${escapeHtml(step.fieldKey)}"
-      type="${escapeHtml(inputType)}"
-      value="${escapeHtml(value)}"
-      ${extraAttrs.join(' ')}${activeAttr}>
-  `;
-}
-
-function buildRowEditorGuideCard(step, row, guideState, activeIndex, index) {
-  const isActive = index === activeIndex;
-  const isComplete = isRowEditorGuideStepComplete(step, row, guideState);
-  const valueText = formatRowEditorGuideValue(step, row, guideState);
-
-  return `
-    <section class="row-editor-guide-step${isActive ? ' is-active' : isComplete ? ' is-complete' : ''}">
-      <div class="row-editor-guide-step-head">
-        <div class="stack-tight">
-          <p class="row-editor-guide-step-eyebrow">質問 ${index + 1}</p>
-          <strong>${escapeHtml(step.prompt)}</strong>
-        </div>
-        <div class="row-editor-guide-step-meta">
-          <span>${escapeHtml(valueText)}</span>
-          ${
-            isComplete
-              ? `<button type="button" class="ghost-button compact-button" data-row-editor-guide-edit="${escapeHtml(step.key)}">変更</button>`
-              : ''
-          }
-        </div>
-      </div>
-      ${
-        isActive
-          ? `
-            <div class="row-editor-guide-step-body">
-              <label class="field row-editor-guide-field">
-                <span>${escapeHtml(step.prompt)}</span>
-                ${buildRowEditorGuideInput(step, row, guideState, true)}
-              </label>
-              ${step.help ? `<p class="row-editor-guide-help">${escapeHtml(step.help)}</p>` : ''}
-            </div>
-          `
-          : ''
-      }
-    </section>
-  `;
-}
-
-function buildRowEditorGuideHtml(row, guideState) {
-  const steps = getRowEditorGuideSteps(row, guideState);
-  const activeIndex = getRowEditorGuideStepIndex(row, guideState, steps);
-  const completedCount = steps.filter((step) => isRowEditorGuideStepComplete(step, row, guideState)).length;
-
-  return `
-    <section class="row-editor-guide panel-soft">
-      <div class="row-editor-guide-header">
-        <div class="stack-tight">
-          <p class="mode-eyebrow">質問モード</p>
-          <h4>よく使う項目を順番に聞きます</h4>
-        </div>
-        <div class="cluster">
-          <span class="subtle">${completedCount} / ${steps.length} 完了</span>
-          <button type="button" class="ghost-button compact-button" data-row-editor-toggle-details>
-            <span class="material-symbols-outlined">tune</span>
-            <span>${state.rowEditor.detailsOpen ? '詳細を閉じる' : '詳細を開く'}</span>
-          </button>
-        </div>
-      </div>
-      <div class="row-editor-guide-list">
-        ${steps.map((step, index) => buildRowEditorGuideCard(step, row, guideState, activeIndex, index)).join('')}
-      </div>
-      <p class="row-editor-guide-note subtle">Enter で次の質問へ進めます。バラ図担当はステップ1の担当を自動で使います。変更したい項目は各カードの「変更」から戻れます。</p>
-    </section>
-  `;
-}
-
-function buildRowEditorAdvancedFieldHtml(field, row) {
   const inputType = field.type || 'text';
   const step = inputType === 'number' ? ' step="1"' : '';
   return `
-    <label class="field row-editor-field">
-      <span>${escapeHtml(field.label)}</span>
+    <label class="field row-editor-field row-editor-question">
+      <span class="row-editor-question-index">質問 ${fieldIndex + 1}</span>
+      <strong class="row-editor-question-text">${escapeHtml(questionText)}</strong>
       <input
         data-row-editor-field="${escapeHtml(field.key)}"
         type="${escapeHtml(inputType)}"
-        value="${escapeHtml(row[field.key] || '')}"${step}>
+        value="${escapeHtml(value)}"${step}>
     </label>
   `;
 }
 
-function shouldShowAdvancedField(fieldKey, guideState) {
-  if (ROW_EDITOR_GUIDED_FIELD_KEYS.has(fieldKey)) {
-    return false;
-  }
-  const scope = normalizeRowEditorScope(guideState.scope || '');
-  if (scope === '枠' && ROW_EDITOR_DOOR_DATE_KEYS.includes(fieldKey)) {
-    return false;
-  }
-  if (scope === '扉' && ROW_EDITOR_FRAME_DATE_KEYS.includes(fieldKey)) {
-    return false;
-  }
-  return true;
-}
-
-function buildRowEditorAdvancedHtml(row, guideState) {
-  const groupsHtml = ROW_EDITOR_GROUPS
-    .map((group) => {
-      const fields = group.keys
-        .map((key) => FIELD_DEF_MAP.get(key))
-        .filter((field) => field && shouldShowAdvancedField(field.key, guideState))
-        .map((field) => buildRowEditorAdvancedFieldHtml(field, row))
-        .join('');
-
-      if (!fields) {
-        return '';
-      }
-
-      return `
-        <section class="row-editor-section">
-          <div class="section-head">
-            <h4>${escapeHtml(group.title)}</h4>
-          </div>
-          <div class="row-editor-fields">
-            ${fields}
-          </div>
-        </section>
-      `;
-    })
-    .filter(Boolean)
-    .join('');
-
-  if (!groupsHtml) {
-    return '<p class="empty-text">詳細項目はありません。</p>';
-  }
-
-  return `
-    <section class="row-editor-details stack-lg">
-      <div class="section-head">
-        <h4>詳細項目</h4>
-      </div>
-      ${groupsHtml}
-    </section>
-  `;
-}
-
-function resetRowEditorState() {
-  state.rowEditor = {
-    open: false,
-    rowId: '',
-    rowIds: [],
-    guideByRowId: Object.create(null),
-    detailsOpen: false
-  };
-}
-
-function syncRowEditorGuideChoice(row, stepKey, value) {
-  const guideState = getRowEditorGuideState(row);
-  const normalized = String(value || '').trim();
-  guideState[stepKey] = normalized;
-  guideState.activeKey = '';
-
-  if (stepKey === 'scope') {
-    if (normalized === '枠') {
-      ROW_EDITOR_DOOR_DATE_KEYS.forEach((fieldKey) => {
-        row[fieldKey] = '';
-      });
-    } else if (normalized === '扉') {
-      ROW_EDITOR_FRAME_DATE_KEYS.forEach((fieldKey) => {
-        row[fieldKey] = '';
-      });
-    }
-  }
-
-  if (stepKey === 'finishMode' && normalized !== '焼付') {
-    row.bakeColor = '';
-  }
-
-  renderRows();
-}
-
-function syncRowEditorGuideSelection(row, stepKey) {
-  const guideState = getRowEditorGuideState(row);
-  guideState.activeKey = stepKey;
-  renderRows();
-}
-
-function getRowEditorDefaultAssignee() {
-  return String(state.project.contact || '').trim();
-}
-
-function syncRowEditorAssigneeDefaults(rows = []) {
-  const defaultAssignee = getRowEditorDefaultAssignee();
-  if (!defaultAssignee) {
-    return false;
-  }
-
-  let changed = false;
-  rows.forEach((row) => {
-    if (!row || String(row.draftAssignee || '').trim()) {
-      return;
-    }
-    row.draftAssignee = defaultAssignee;
-    changed = true;
-  });
-  return changed;
-}
-
 function createUiRow(overrides = {}) {
-  const defaultDraftAssignee = String(overrides.draftAssignee || '').trim() || getRowEditorDefaultAssignee();
   return {
     ...ROW_TEMPLATE,
     uiId: crypto.randomUUID(),
-    ...overrides,
-    draftAssignee: defaultDraftAssignee
+    ...overrides
   };
 }
 
@@ -1594,7 +1252,7 @@ function renderReportWizard() {
 
 function renderTableHead() {
   const headCells = ['<th class="checkbox-cell"><input id="toggleAllRows" type="checkbox"></th>']
-    .concat(FIELD_DEFS.map((field) => `<th style="min-width:${field.width};">${escapeHtml(field.label)}</th>`))
+    .concat(VISIBLE_FIELD_DEFS.map((field) => `<th style="min-width:${field.width};">${escapeHtml(field.label)}</th>`))
     .join('');
   elements.tableHead.innerHTML = `<tr>${headCells}</tr>`;
 }
@@ -1651,20 +1309,6 @@ function updateRowEditorLauncher() {
 }
 
 function focusRowEditorInput() {
-  const activeGuideInput = elements.rowEditorForm?.querySelector('[data-row-editor-guide-active="true"]');
-  if (activeGuideInput) {
-    activeGuideInput.focus();
-    activeGuideInput.select?.();
-    return;
-  }
-
-  const firstGuideInput = elements.rowEditorForm?.querySelector('[data-row-editor-guide-input="true"]');
-  if (firstGuideInput) {
-    firstGuideInput.focus();
-    firstGuideInput.select?.();
-    return;
-  }
-
   const modalInputs = Array.from(elements.rowEditorForm?.querySelectorAll('[data-row-editor-field]') || []);
   const target = modalInputs.find((input) => !String(input.value || '').trim()) || modalInputs[0];
   target?.focus();
@@ -1672,7 +1316,10 @@ function focusRowEditorInput() {
 }
 
 function closeRowEditor({ restoreFocus = false } = {}) {
-  resetRowEditorState();
+  state.rowEditor.open = false;
+  state.rowEditor.rowId = '';
+  state.rowEditor.rowIds = [];
+  state.rowEditor.pageIndex = 0;
   document.body.classList.remove('is-modal-open');
   if (elements.rowEditorOverlay) {
     elements.rowEditorOverlay.classList.remove('is-active');
@@ -1693,17 +1340,7 @@ function openRowEditor(rowId = '') {
   state.rowEditor.open = true;
   state.rowEditor.rowIds = rowIds;
   state.rowEditor.rowId = rowId && rowIds.includes(rowId) ? rowId : rowIds[0];
-  state.rowEditor.detailsOpen = false;
-  const editedRows = state.rowEditor.rowIds
-    .map((itemId) => state.rows.find((item) => item.uiId === itemId))
-    .filter(Boolean);
-  if (syncRowEditorAssigneeDefaults(editedRows)) {
-    scheduleAutoSave();
-  }
-  const currentRow = getRowEditorRow();
-  if (currentRow) {
-    getRowEditorGuideState(currentRow);
-  }
+  state.rowEditor.pageIndex = 0;
   renderRowEditor();
 }
 
@@ -1720,53 +1357,35 @@ function moveRowEditor(offset) {
     return;
   }
   state.rowEditor.rowId = state.rowEditor.rowIds[nextIndex];
+  state.rowEditor.pageIndex = 0;
   renderRows();
 }
 
-function renderRowEditorQuestionnaire() {
-  if (!elements.rowEditorOverlay || !elements.rowEditorForm || !elements.rowEditorTitle || !elements.rowEditorMeta) {
-    return false;
+function moveRowEditorPage(offset) {
+  if (!state.rowEditor.open || !state.rowEditor.rowIds.length) {
+    return;
   }
 
-  updateRowEditorLauncher();
-
-  if (!state.rowEditor.open) {
-    elements.rowEditorOverlay.classList.remove('is-active');
-    elements.rowEditorOverlay.hidden = true;
-    return true;
-  }
-
-  state.rowEditor.rowIds = state.rowEditor.rowIds.filter((rowId) => state.rows.some((row) => row.uiId === rowId));
   const row = getRowEditorRow();
-  if (!row || !state.rowEditor.rowIds.length) {
-    closeRowEditor();
-    return true;
+  if (!row) {
+    return;
   }
 
-  const currentIndex = Math.max(0, state.rowEditor.rowIds.indexOf(row.uiId));
-  const guideState = getRowEditorGuideState(row);
-  const guideHtml = buildRowEditorGuideHtml(row, guideState);
-  const advancedHtml = state.rowEditor.detailsOpen ? buildRowEditorAdvancedHtml(row, guideState) : '';
+  const pages = getRowEditorPages(row);
+  if (!pages.length) {
+    return;
+  }
 
-  elements.rowEditorTitle.textContent = row.symbol ? `${row.symbol} を質問入力` : `符号 ${currentIndex + 1} を質問入力`;
-  elements.rowEditorMeta.textContent = `${currentIndex + 1} / ${state.rowEditor.rowIds.length}`;
-  elements.rowEditorPrevButton.disabled = currentIndex <= 0;
-  elements.rowEditorNextButton.disabled = currentIndex >= state.rowEditor.rowIds.length - 1;
-  elements.rowEditorForm.innerHTML = `${guideHtml}${advancedHtml}`;
-  elements.rowEditorOverlay.hidden = false;
-  document.body.classList.add('is-modal-open');
-  window.requestAnimationFrame(() => {
-    elements.rowEditorOverlay?.classList.add('is-active');
-    focusRowEditorInput();
-  });
-  return true;
+  const nextIndex = Math.min(Math.max(state.rowEditor.pageIndex + offset, 0), pages.length - 1);
+  if (nextIndex === state.rowEditor.pageIndex) {
+    return;
+  }
+
+  state.rowEditor.pageIndex = nextIndex;
+  renderRowEditor();
 }
 
 function renderRowEditor() {
-  if (renderRowEditorQuestionnaire()) {
-    return;
-  }
-
   if (!elements.rowEditorOverlay || !elements.rowEditorForm || !elements.rowEditorTitle || !elements.rowEditorMeta) {
     return;
   }
@@ -1787,44 +1406,50 @@ function renderRowEditor() {
   }
 
   const currentIndex = Math.max(0, state.rowEditor.rowIds.indexOf(row.uiId));
-  const groupsHtml = ROW_EDITOR_GROUPS
-    .map((group) => {
-      const fields = group.keys
-        .map((key) => FIELD_DEF_MAP.get(key))
-        .filter(Boolean)
-        .map((field) => {
-          const inputType = field.type || 'text';
-          const step = inputType === 'number' ? ' step="1"' : '';
-          return `
-            <label class="field row-editor-field">
-              <span>${escapeHtml(field.label)}</span>
-              <input
-                data-row-editor-field="${escapeHtml(field.key)}"
-                type="${escapeHtml(inputType)}"
-                value="${escapeHtml(row[field.key] || '')}"${step}>
-            </label>
-          `;
-        })
-        .join('');
+  const pages = getRowEditorPages(row);
+  if (!pages.length) {
+    closeRowEditor();
+    return;
+  }
 
-      return `
-        <section class="row-editor-section">
-          <div class="section-head">
-            <h4>${escapeHtml(group.title)}</h4>
-          </div>
-          <div class="row-editor-fields">
-            ${fields}
-          </div>
-        </section>
-      `;
-    })
+  state.rowEditor.pageIndex = Math.min(Math.max(state.rowEditor.pageIndex, 0), pages.length - 1);
+  const page = pages[state.rowEditor.pageIndex];
+  const pageFieldsHtml = page.fields
+    .map((field, fieldIndex) => renderRowEditorField(field, row, fieldIndex))
     .join('');
+  const pageNavHtml = `
+    <div class="row-editor-page-nav">
+      <button type="button" class="ghost-button compact-button" data-row-editor-page-prev${state.rowEditor.pageIndex <= 0 ? ' disabled' : ''}>
+        <span class="material-symbols-outlined">arrow_back</span>
+        <span>前の質問</span>
+      </button>
+      <span class="subtle row-editor-page-indicator">${state.rowEditor.pageIndex + 1} / ${pages.length}</span>
+      <button type="button" class="ghost-button compact-button" data-row-editor-page-next${state.rowEditor.pageIndex >= pages.length - 1 ? ' disabled' : ''}>
+        <span>次の質問</span>
+        <span class="material-symbols-outlined">arrow_forward</span>
+      </button>
+    </div>
+  `;
 
   elements.rowEditorTitle.textContent = row.symbol ? `${row.symbol} を入力` : `符号 ${currentIndex + 1} を入力`;
   elements.rowEditorMeta.textContent = `${currentIndex + 1} / ${state.rowEditor.rowIds.length}`;
   elements.rowEditorPrevButton.disabled = currentIndex <= 0;
   elements.rowEditorNextButton.disabled = currentIndex >= state.rowEditor.rowIds.length - 1;
-  elements.rowEditorForm.innerHTML = groupsHtml;
+  elements.rowEditorForm.innerHTML = `
+    <section class="row-editor-section row-editor-page">
+      <div class="section-head row-editor-page-head">
+        <div class="stack-tight">
+          <h4>${escapeHtml(page.title)}</h4>
+          <p class="subtle">${escapeHtml(page.description)}</p>
+        </div>
+        <span class="row-editor-page-counter">${state.rowEditor.pageIndex + 1} / ${pages.length}</span>
+      </div>
+      <div class="row-editor-fields row-editor-page-fields">
+        ${pageFieldsHtml}
+      </div>
+      ${pages.length > 1 ? pageNavHtml : ''}
+    </section>
+  `;
   elements.rowEditorOverlay.hidden = false;
   document.body.classList.add('is-modal-open');
   window.requestAnimationFrame(() => {
@@ -2135,7 +1760,6 @@ async function handlePdfImport(file) {
   document.body.classList.add('is-importing-pdf');
   elements.pickPdfButton?.setAttribute('disabled', 'disabled');
   try {
-    const { extractHandaiDataFromPdf } = await loadGeminiModule();
     const extracted = await extractHandaiDataFromPdf(file);
 
     const bundle = extracted.project.c2
@@ -2248,7 +1872,7 @@ function renderSummary(rows) {
 
 function renderInspectionTable(rows) {
   if (!rows.length) {
-    elements.inspectionTableBody.innerHTML = '<tr><td colspan="8" class="empty-text">手配書を読み込むと検査表が表示されます。</td></tr>';
+    elements.inspectionTableBody.innerHTML = '<tr><td colspan="7" class="empty-text">手配書を読み込むと検査表が表示されます。</td></tr>';
     return;
   }
 
@@ -2262,7 +1886,6 @@ function renderInspectionTable(rows) {
         <td>${escapeHtml(row.insideOutside || '')}</td>
         <td>${escapeHtml(row.labelCount || '')}</td>
         <td>${escapeHtml(row.bakeColor || '')}</td>
-        <td>${escapeHtml(row.draftAssignee || '')}</td>
       </tr>
     `)
     .join('');
@@ -2278,7 +1901,7 @@ function renderReport() {
 function renderRows() {
   const visibleRows = state.rows.filter(matchesFilter);
   if (!visibleRows.length) {
-    elements.tableBody.innerHTML = '<tr><td colspan="34" class="empty-text">表示できる符号がありません。</td></tr>';
+    elements.tableBody.innerHTML = `<tr><td colspan="${VISIBLE_FIELD_DEFS.length + 1}" class="empty-text">表示できる符号がありません。</td></tr>`;
     renderReport();
     updateRowEditorLauncher();
     if (state.rowEditor.open) {
@@ -2294,7 +1917,7 @@ function renderRows() {
           <input type="checkbox" data-row-select="${escapeHtml(row.uiId)}"${state.selectedRowIds.has(row.uiId) ? ' checked' : ''}>
         </td>
       `;
-      const cells = FIELD_DEFS.map((field) => {
+      const cells = VISIBLE_FIELD_DEFS.map((field) => {
         const value = row[field.key] || '';
         const inputType = field.type || 'text';
         const step = inputType === 'number' ? ' step="1"' : '';
@@ -2411,7 +2034,6 @@ function clearProjectState() {
   resetDrawingState();
   resetAssignmentState();
   resetReportState();
-  resetRowEditorState();
   syncSavedSignature();
   renderAll();
 }
@@ -2844,7 +2466,10 @@ function deleteSelectedRows() {
     state.rows = [createUiRow()];
   }
   if (state.rowEditor.open && !state.rows.some((row) => row.uiId === state.rowEditor.rowId)) {
-    resetRowEditorState();
+    state.rowEditor.open = false;
+    state.rowEditor.rowId = '';
+    state.rowEditor.rowIds = [];
+    state.rowEditor.pageIndex = 0;
   }
   state.selectedRowIds = new Set();
   renderRows();
@@ -3285,66 +2910,30 @@ function bindEvents() {
     }
     renderReport();
     scheduleAutoSave();
+    if (input.dataset.rowEditorField === 'frameDoorKind') {
+      renderRowEditor();
+    }
   });
 
-  elements.rowEditorForm?.addEventListener('change', (event) => {
-    const choice = event.target.closest('[data-row-editor-guide-choice]');
-    if (!choice) {
+  elements.rowEditorForm?.addEventListener('click', (event) => {
+    const prevButton = event.target.closest('[data-row-editor-page-prev]');
+    if (prevButton) {
+      event.preventDefault();
+      moveRowEditorPage(-1);
       return;
     }
-    const row = getRowEditorRow();
-    if (!row) {
-      return;
+
+    const nextButton = event.target.closest('[data-row-editor-page-next]');
+    if (nextButton) {
+      event.preventDefault();
+      moveRowEditorPage(1);
     }
-    syncRowEditorGuideChoice(row, choice.dataset.rowEditorGuideChoice || '', choice.value);
   });
 
   elements.rowEditorForm?.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       moveRowEditor(event.shiftKey ? -1 : 1);
-      return;
-    }
-
-    const guideInput = event.target.closest('[data-row-editor-guide-input="true"]');
-    if (!guideInput || event.key !== 'Enter' || event.shiftKey) {
-      return;
-    }
-
-    event.preventDefault();
-    const row = getRowEditorRow();
-    if (!row) {
-      return;
-    }
-    const guideState = getRowEditorGuideState(row);
-    const stepKey = guideInput.dataset.rowEditorGuideStep || '';
-    const step = getRowEditorGuideSteps(row, guideState).find((item) => item.key === stepKey);
-    if (!step) {
-      return;
-    }
-    if (!isRowEditorGuideStepComplete(step, row, guideState)) {
-      showToast('入力してください。', 'error');
-      return;
-    }
-    guideState.activeKey = '';
-    renderRows();
-  });
-
-  elements.rowEditorForm?.addEventListener('click', (event) => {
-    const editButton = event.target.closest('[data-row-editor-guide-edit]');
-    if (editButton) {
-      const row = getRowEditorRow();
-      if (!row) {
-        return;
-      }
-      syncRowEditorGuideSelection(row, editButton.dataset.rowEditorGuideEdit || '');
-      return;
-    }
-
-    const toggleDetailsButton = event.target.closest('[data-row-editor-toggle-details]');
-    if (toggleDetailsButton) {
-      state.rowEditor.detailsOpen = !state.rowEditor.detailsOpen;
-      renderRows();
     }
   });
 
@@ -3469,17 +3058,24 @@ function renderInitialState() {
   renderAll();
 }
 
+function pruneInspectionTableHeader() {
+  const inspectionTable = elements.inspectionTableBody?.closest('table');
+  const headerCells = inspectionTable?.querySelectorAll('thead th');
+  if (!headerCells || headerCells.length <= 7) {
+    return;
+  }
+
+  headerCells[headerCells.length - 1].remove();
+}
+
 async function bootstrap() {
+  pruneInspectionTableHeader();
   renderInitialState();
   bindEvents();
   setActiveMode(state.activeMode);
   setStatus('Firestore 版を初期化しました。');
+  await refreshProjects();
   markAppReady();
-  void refreshProjects();
 }
 
-bootstrap().catch((error) => {
-  console.error(error);
-  setStatus(`初期化に失敗しました: ${error.message}`);
-  markAppReady();
-});
+bootstrap();
