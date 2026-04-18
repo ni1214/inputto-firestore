@@ -15,6 +15,7 @@ export const ROW_TEMPLATE = {
   docId: '',
   symbol: '',
   name: '',
+  frameDoorKind: '',
   floor: '',
   left: '',
   right: '',
@@ -50,6 +51,7 @@ export const ROW_TEMPLATE = {
 export const FIELD_DEFS = [
   { key: 'symbol', label: '符号', required: true, width: '12rem' },
   { key: 'name', label: '品名', width: '12rem' },
+  { key: 'frameDoorKind', label: '枠/扉', type: 'select', options: ['枠', '扉', '枠扉'], width: '7rem' },
   { key: 'floor', label: 'フロア', width: '8rem' },
   { key: 'left', label: 'L', type: 'number', width: '5rem' },
   { key: 'right', label: 'R', type: 'number', width: '5rem' },
