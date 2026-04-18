@@ -124,22 +124,8 @@ function sanitizeRow(row) {
     dh: sanitizeNumberText(row.dh),
     insideOutside: sanitizeText(row.insideOutside),
     labelCount: sanitizeNumberText(row.labelCount),
-    labelRightCount: sanitizeNumberText(row.labelRightCount),
-    labelDoubleCount: sanitizeNumberText(row.labelDoubleCount),
-    labelNoHandCount: sanitizeNumberText(row.labelNoHandCount),
     bakeColor: sanitizeText(row.bakeColor),
     floorQuantity: sanitizeNumberText(row.floorQuantity),
-    gwDensity: sanitizeNumberText(row.gwDensity),
-    gwThickness: sanitizeNumberText(row.gwThickness),
-    rwDensity: sanitizeNumberText(row.rwDensity),
-    rwThickness: sanitizeNumberText(row.rwThickness),
-    draftAssignee: sanitizeText(row.draftAssignee),
-    draftFrameAt: sanitizeDateText(row.draftFrameAt),
-    draftDoorAt: sanitizeDateText(row.draftDoorAt),
-    assemblyFrameCompletedAt: sanitizeDateText(row.assemblyFrameCompletedAt),
-    assemblyDoorCompletedAt: sanitizeDateText(row.assemblyDoorCompletedAt),
-    frameShipDate: sanitizeDateText(row.frameShipDate),
-    doorShipDate: sanitizeDateText(row.doorShipDate)
   };
 }
 
@@ -191,6 +177,24 @@ function hasAnyRowContent(row) {
 }
 
 const ROW_FIELDS = Object.keys(sanitizeRow({}));
+const ROW_FIELD_SET = new Set(ROW_FIELDS);
+const SYMBOL_METADATA_KEYS = new Set([
+  'c2',
+  'projectName',
+  'shortName',
+  'contact',
+  'drawingId',
+  'drawingNumber',
+  'drawingStatus',
+  'symbolN',
+  'floorN',
+  'insideOutsideN',
+  'nameN',
+  'createdAt',
+  'createdBy',
+  'updatedAt',
+  'updatedBy'
+]);
 const SYMBOL_PREVIEW_LIMIT = 6;
 const MAX_BATCH_WRITES = 450;
 
@@ -257,6 +261,12 @@ function mergeRowData(existingEntry, incomingRow, preserveExistingBlank) {
 
   const merged = { ...existingEntry };
   delete merged.id;
+  Object.keys(merged).forEach((key) => {
+    if (ROW_FIELD_SET.has(key) || SYMBOL_METADATA_KEYS.has(key)) {
+      return;
+    }
+    delete merged[key];
+  });
 
   ROW_FIELDS.forEach((key) => {
     if (sanitized[key] !== '') {

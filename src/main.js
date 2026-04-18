@@ -153,17 +153,7 @@ let lastSavedSignature = '';
 let appDragDepth = 0;
 const FIELD_DEF_MAP = new Map(FIELD_DEFS.map((field) => [field.key, field]));
 const HIDDEN_FIELD_KEYS = new Set([
-  'labelRightCount',
-  'labelDoubleCount',
-  'labelNoHandCount',
   'frameDoorKind',
-  'draftAssignee',
-  'draftFrameAt',
-  'draftDoorAt',
-  'assemblyFrameCompletedAt',
-  'assemblyDoorCompletedAt',
-  'frameShipDate',
-  'doorShipDate'
 ]);
 const VISIBLE_FIELD_DEFS = FIELD_DEFS.filter((field) => !HIDDEN_FIELD_KEYS.has(field.key));
 const VISIBLE_FIELD_DEF_MAP = new Map(VISIBLE_FIELD_DEFS.map((field) => [field.key, field]));
@@ -187,21 +177,7 @@ const ROW_EDITOR_QUESTION_TEXTS = {
   dwRight: 'DW(R)は？',
   dh: 'DHは？',
   labelCount: 'ラベル枚数は？',
-  labelRightCount: 'Rは？',
-  labelDoubleCount: '両は？',
-  labelNoHandCount: '勝手なしは？',
   bakeColor: '焼付色は？',
-  gwDensity: 'GW密度は？',
-  gwThickness: 'GW厚みは？',
-  rwDensity: 'RW密度は？',
-  rwThickness: 'RW厚みは？',
-  draftAssignee: 'バラ図担当は？',
-  draftFrameAt: 'バラ図_枠は？',
-  draftDoorAt: 'バラ図_扉は？',
-  assemblyFrameCompletedAt: '組立完了日_枠は？',
-  assemblyDoorCompletedAt: '組立完了日_扉は？',
-  frameShipDate: '枠出荷日は？',
-  doorShipDate: '扉出荷日は？'
 };
 
 const ROW_EDITOR_PAGE_DEFS = [
@@ -246,26 +222,8 @@ const ROW_EDITOR_PAGE_DEFS = [
   {
     key: 'label',
     title: 'ラベル',
-    description: 'ラベル枚数の内訳を入れます。',
-    fieldKeys: ['labelCount', 'labelRightCount', 'labelDoubleCount', 'labelNoHandCount']
-  },
-  {
-    key: 'insulation',
-    title: '断熱材',
-    description: 'GW / RW の密度と厚みを入れます。',
-    fieldKeys: ['gwDensity', 'gwThickness', 'rwDensity', 'rwThickness']
-  },
-  {
-    key: 'draft',
-    title: 'バラ図',
-    description: 'バラ図担当と日付を入れます。',
-    fieldKeys: ['draftAssignee', 'draftFrameAt', 'draftDoorAt']
-  },
-  {
-    key: 'schedule',
-    title: '組立・出荷',
-    description: '組立完了と出荷日を入れます。',
-    fieldKeys: ['assemblyFrameCompletedAt', 'assemblyDoorCompletedAt', 'frameShipDate', 'doorShipDate']
+    description: 'ラベル枚数を入れます。',
+    fieldKeys: ['labelCount']
   }
 ];
 

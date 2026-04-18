@@ -24,22 +24,8 @@ const FIELD_KEYS = [
   'dh',
   'insideOutside',
   'labelCount',
-  'labelRightCount',
-  'labelDoubleCount',
-  'labelNoHandCount',
   'bakeColor',
   'floorQuantity',
-  'gwDensity',
-  'gwThickness',
-  'rwDensity',
-  'rwThickness',
-  'draftAssignee',
-  'draftFrameAt',
-  'draftDoorAt',
-  'assemblyFrameCompletedAt',
-  'assemblyDoorCompletedAt',
-  'frameShipDate',
-  'doorShipDate'
 ];
 
 const ai = getAI(app, { backend: new GoogleAIBackend() });
@@ -127,7 +113,7 @@ export function buildHandaiExtractionPrompt() {
     'Use the drawing number exactly as written, including values like 1-1 or 1-2.',
     'Use shortName for the label-friendly site abbreviation.',
     'drawingStatus should be short text such as 外部, 内部, 共通, or 未定.',
-    'Rows should include manufacturing columns like W, H, frame depth, DW, DH, inside or outside, bake color, GW or RW density and thickness, label counts, and dates whenever found.',
+    'Rows should include manufacturing columns like W, H, frame depth, DW, DH, inside or outside, bake color, and label counts whenever found.',
     'If something is uncertain, still return your best effort and note the issue in errors.',
     'Do not include markdown fences.',
     'JSON root keys must be: project, drawing, rows, errors.'
